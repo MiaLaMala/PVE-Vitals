@@ -72,11 +72,46 @@ The machine's local IP is typically something like `192.168.1.x`. Navigate to `h
 
 ---
 
+## Auto-deploy via GitLab webhook
+
+`deploy.js` is a lightweight HTTP server that listens for push events from GitLab and runs `git pull` + `pm2 restart` automatically.
+
+### On your server
+
+```bash
+# Run the webhook listener with PM2
+DEPLOY_SECRET=your-strong-secret \
+REPO_PATH=/opt/pve-status \
+PM2_APP=proxmox-dashboard \
+pm2 start deploy.js --name deploy-webhook
+pm2 save
+```
+
+| Env var | Default | Description |
+|---|---|---|
+| `DEPLOY_SECRET` | *(required)* | Shared secret with GitLab |
+| `REPO_PATH` | `/opt/pve-status` | Path to the cloned repo on the server |
+| `PM2_APP` | `proxmox-dashboard` | PM2 app name to restart |
+| `DEPLOY_PORT` | `4000` | Port the webhook listener binds to |
+
+### In GitLab
+
+**Settings → Webhooks → Add new webhook**
+
+| Field | Value |
+|---|---|
+| URL | `http://your-server-ip:4000/deploy` |
+| Secret token | same as `DEPLOY_SECRET` |
+| Trigger | Push events → branch `main` |
+
+---
+
 ## Project structure
 
 ```
 .
 ├── server.js          # Express backend — proxies Proxmox API
+├── deploy.js          # GitLab webhook receiver for auto-deploy
 ├── public/
 │   ├── index.html     # App shell
 │   ├── style.css      # Mobile-first dark theme
