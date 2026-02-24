@@ -222,6 +222,16 @@ function nodeCard(node) {
         <canvas class="sparkline" id="spark-mem-${escHtml(node.node)}" width="200" height="36"></canvas>
       </div>
     </div>
+    <div class="mini-chart-row net-chart-row">
+      <div class="mini-chart">
+        <div class="mini-chart-label net-in-label">Net In <span id="spark-netin-val-${escHtml(node.node)}" class="mini-chart-val"></span></div>
+        <canvas class="sparkline" id="spark-netin-${escHtml(node.node)}" width="200" height="36"></canvas>
+      </div>
+      <div class="mini-chart">
+        <div class="mini-chart-label net-out-label">Net Out <span id="spark-netout-val-${escHtml(node.node)}" class="mini-chart-val"></span></div>
+        <canvas class="sparkline" id="spark-netout-${escHtml(node.node)}" width="200" height="36"></canvas>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -255,6 +265,19 @@ async function drawNodeSparklines(node) {
       rrd.map(p => p.maxmem ? (p.mem / p.maxmem) * 100 : 0),
       '#2ea043'
     );
+
+    const netinData  = rrd.map(p => p.netin  ?? 0);
+    const netoutData = rrd.map(p => p.netout ?? 0);
+    drawSparkline(`spark-netin-${node.node}`,  netinData,  '#a371f7');
+    drawSparkline(`spark-netout-${node.node}`, netoutData, '#f78166');
+
+    // Show latest rate as a label
+    const lastIn  = netinData[netinData.length - 1]   || 0;
+    const lastOut = netoutData[netoutData.length - 1]  || 0;
+    const valIn  = document.getElementById(`spark-netin-val-${node.node}`);
+    const valOut = document.getElementById(`spark-netout-val-${node.node}`);
+    if (valIn)  valIn.textContent  = fmtBytes(lastIn)  + '/s';
+    if (valOut) valOut.textContent = fmtBytes(lastOut) + '/s';
   } catch { /* ignore */ }
 }
 
