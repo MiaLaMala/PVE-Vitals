@@ -42,8 +42,13 @@ esac
 [ -f /etc/pve/local/pve-ssl.pem ] && warn "Running directly on the Proxmox host. This works, but a Debian LXC is cleaner for updates."
 
 # ==== Prompts (read from /dev/tty so curl|bash still works) ==================
+# Look up an env var by name without tripping `set -u` when unset.
+get_env() { printenv -- "$1" 2>/dev/null || true; }
+
 prompt() {
-  local var="$1" msg="$2" default="${3:-}" val="${!var:-}"
+  local var="$1" msg="$2" default="${3:-}"
+  local val
+  val="$(get_env "$var")"
   if [ -z "$val" ]; then
     [ -r /dev/tty ] || die "Prompt for $var needs a TTY. Pass $var via environment for non-interactive install."
     if [ -n "$default" ]; then printf "%s [%s]: " "$msg" "$default" > /dev/tty
@@ -54,8 +59,11 @@ prompt() {
   fi
   printf '%s' "$val"
 }
+
 prompt_secret() {
-  local var="$1" msg="$2" val="${!var:-}"
+  local var="$1" msg="$2"
+  local val
+  val="$(get_env "$var")"
   if [ -z "$val" ]; then
     [ -r /dev/tty ] || die "Prompt for $var needs a TTY. Pass $var via environment for non-interactive install."
     printf "%s: " "$msg" > /dev/tty
