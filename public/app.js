@@ -21,6 +21,8 @@ const state = {
   tasksAckedUntil: 0,
   backupJobs: [],
   guestInfo: {},
+  guestBackups: {},
+  notBackedUp: [],
   timeframe: 'hour',
   timeframeCycle: ['hour', 'day', 'week'],
   timeframeIdx: 0,
@@ -65,6 +67,8 @@ const i18n = {
     markAsRead: 'Mark as read',
     backupJobs: 'Backup jobs',
     backupAll: 'all guests',
+    lastBackup: 'Backup',
+    noBackupAlert: (n) => n === 1 ? '1 guest without backup' : `${n} guests without backup`,
   },
   de: {
     cluster: 'Cluster',
@@ -101,6 +105,8 @@ const i18n = {
     markAsRead: 'Als erledigt markieren',
     backupJobs: 'Backup-Aufträge',
     backupAll: 'alle Gäste',
+    lastBackup: 'Backup',
+    noBackupAlert: (n) => n === 1 ? '1 Gast ohne Backup' : `${n} Gäste ohne Backup`,
   },
 };
 
@@ -206,18 +212,22 @@ async function api(path) {
 // ==== Data fetch ============================================================
 async function fetchAll() {
   try {
-    const [nodes, resources, ack, backupJobs, guestInfo] = await Promise.all([
+    const [nodes, resources, ack, backupJobs, guestInfo, guestBackups, notBackedUp] = await Promise.all([
       api('/api/nodes'),
       api('/api/cluster/resources'),
       api('/api/ack').catch(() => ({ tasksAckedUntil: 0 })),
       api('/api/cluster/backup-jobs').catch(() => []),
       api('/api/guests/info').catch(() => ({})),
+      api('/api/guests/backups').catch(() => ({})),
+      api('/api/cluster/not-backed-up').catch(() => []),
     ]);
     state.nodes = nodes;
     state.resources = resources;
     state.tasksAckedUntil = ack.tasksAckedUntil || 0;
     state.backupJobs = backupJobs || [];
     state.guestInfo = guestInfo || {};
+    state.guestBackups = guestBackups || {};
+    state.notBackedUp = notBackedUp || [];
 
     await Promise.all(nodes.map(async (n) => {
       if (n.status !== 'online') return;
@@ -288,6 +298,10 @@ function computeAlerts() {
       .slice(0, 3)
       .forEach((tk) => alerts.push({ sev: 'warn', msg: t('taskFailedAlert', tk.type || '?', node) }));
   });
+
+  if ((state.notBackedUp || []).length > 0) {
+    alerts.push({ sev: 'warn', msg: t('noBackupAlert', state.notBackedUp.length) });
+  }
 
   return alerts;
 }
@@ -498,6 +512,26 @@ function sparkline(canvas, label, series, { fill = false, maxOverride = null } =
   });
 }
 
+// ==== Tag and OS helpers ==================================================
+// Stable FNV-1a hash → hue in [0,360) so the same tag always gets the same color.
+function tagHue(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % 360;
+}
+
+// Compact inline SVG icons. Inherit color via currentColor / fill.
+const OS_ICONS = {
+  windows: '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></svg>',
+  linux:   '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="4.5" rx="3" ry="3.5"/><ellipse cx="8" cy="11" rx="4.5" ry="4.5"/><circle cx="6.5" cy="4" r=".9" fill="#0b0d12"/><circle cx="9.5" cy="4" r=".9" fill="#0b0d12"/></svg>',
+  bsd:     '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M5 6 L8 9 L11 6" stroke="#0b0d12" stroke-width="1.5" fill="none"/></svg>',
+  solaris: '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>',
+};
+function osIcon(os) { return OS_ICONS[os] || ''; }
+
 // ==== Render: VMs panel ====================================================
 function renderVMs() {
   const th = state.thresholds;
@@ -526,18 +560,32 @@ function renderVMs() {
     const memSev = sevForPct(memPct, th.memWarn, th.memCrit);
     const sev = !isRun ? 'idle' : maxSev(cpuSev, memSev);
     const kind = v.type === 'qemu' ? 'VM' : 'CT';
-    const ips = state.guestInfo[`${v.type}/${v.vmid}/${v.node}`] || [];
+    const info = state.guestInfo[`${v.type}/${v.vmid}/${v.node}`] || {};
+    const ips = info.ips || [];
     const ipLine = isRun && ips.length
       ? `<div class="vm-ips" title="${esc(ips.join(', '))}">${esc(ips.join(' · '))}</div>`
+      : '';
+    const tags = String(v.tags || '').split(/[;,]/).filter(Boolean);
+    const tagPills = tags
+      .map((tg) => `<span class="tag" style="--tag-hue:${tagHue(tg)}">${esc(tg)}</span>`)
+      .join('');
+    const lastBackupTs = state.guestBackups[String(v.vmid)];
+    const backupLine = lastBackupTs
+      ? `<div class="vm-backup">${esc(t('lastBackup'))} ${esc(fmtRelTime(lastBackupTs))}</div>`
       : '';
 
     return `
     <div class="vm-row sev-${sev}">
       <span class="dot dot-${isRun ? 'ok' : 'idle'}"></span>
       <div class="vm-main">
-        <div class="vm-name">${esc(v.name || `${kind} ${v.vmid}`)}</div>
+        <div class="vm-name">
+          ${osIcon(info.os)}
+          <span class="vm-name-text">${esc(v.name || `${kind} ${v.vmid}`)}</span>
+          ${tagPills}
+        </div>
         <div class="vm-meta">${esc(kind)} · #${esc(v.vmid)} · ${esc(v.node)}${isRun && v.cpus ? ` · ${esc(v.cpus)} vCPU` : ''}</div>
         ${ipLine}
+        ${backupLine}
       </div>
       ${isRun ? `
       <div class="vm-bars">

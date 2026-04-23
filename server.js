@@ -148,10 +148,56 @@ app.get('/api/cluster/backup-jobs', safeGet(async () =>
   })
 ));
 
-// Gather IP addresses for every running guest.
-// QEMU needs the guest agent installed and running (with VM.Audit perms);
-// LXC uses the host-visible /interfaces endpoint. Failures per guest are
-// swallowed so one broken agent does not kill the response.
+// Guests not covered by any backup job.
+app.get('/api/cluster/not-backed-up', safeGet(async () =>
+  cachedGet('not-backed-up', 300, async () => {
+    try {
+      const r = await pve.get('/cluster/backup-info/not-backed-up');
+      return r.data.data || [];
+    } catch { return []; }
+  })
+));
+
+// Last successful vzdump per vmid, collected from each node's task log.
+app.get('/api/guests/backups', safeGet(async () =>
+  cachedGet('guest-backups', 120, async () => {
+    const latest = {};
+    let nodes = [];
+    try { nodes = (await pve.get('/nodes')).data.data || []; } catch { return latest; }
+    await Promise.all(nodes.map(async (n) => {
+      if (n.status !== 'online') return;
+      try {
+        const r = await pve.get(`/nodes/${n.node}/tasks?typefilter=vzdump&limit=500`);
+        (r.data.data || []).forEach((tk) => {
+          if (tk.status !== 'OK' || !tk.endtime || !tk.id) return;
+          const vmid = String(tk.id).match(/^\d+$/) ? String(tk.id) : null;
+          if (!vmid) return;
+          if (!latest[vmid] || latest[vmid] < tk.endtime) latest[vmid] = tk.endtime;
+        });
+      } catch { /* skip this node's history */ }
+    }));
+    return latest;
+  })
+));
+
+// Proxmox ostype values vary between qemu (l26, win11, ...) and lxc (debian,
+// ubuntu, alpine, ...). Collapse them to a small set the frontend can icon.
+function osFamily(ostype) {
+  if (!ostype) return null;
+  const s = String(ostype).toLowerCase();
+  if (s.startsWith('win') || s.startsWith('w2k') || s === 'wxp' || s === 'wvista') return 'windows';
+  if (s === 'l26' || s === 'l24' || s === 'linux') return 'linux';
+  if ([
+    'debian', 'ubuntu', 'alpine', 'centos', 'fedora', 'arch', 'gentoo',
+    'opensuse', 'nixos', 'rockylinux', 'almalinux', 'devuan',
+  ].includes(s)) return 'linux';
+  if (s === 'solaris') return 'solaris';
+  if (s === 'freebsd') return 'bsd';
+  return null;
+}
+
+// Gather IPs and OS family for every running guest. Failures per guest are
+// swallowed so one broken agent never kills the response.
 app.get('/api/guests/info', safeGet(async () =>
   cachedGet('guest-info', 30, async () => {
     const all = (await pve.get('/cluster/resources')).data.data;
@@ -164,42 +210,56 @@ app.get('/api/guests/info', safeGet(async () =>
         .map((a) => a['ip-address'])
         .filter((ip) => ip && !ip.startsWith('127.') && !ip.startsWith('169.254.'));
 
-    const results = await Promise.allSettled(guests.map(async (g) => {
-      const key = `${g.type}/${g.vmid}/${g.node}`;
-      if (g.type === 'qemu') {
+    async function fetchIps(g) {
+      try {
+        if (g.type === 'qemu') {
+          const r = await pve.get(
+            `/nodes/${g.node}/qemu/${g.vmid}/agent/network-get-interfaces`,
+            { timeout: 3000 }
+          );
+          const ips = [];
+          (r.data.data.result || []).forEach((i) => {
+            if (i.name === 'lo') return;
+            extractIps(i['ip-addresses']).forEach((ip) => ips.push(ip));
+          });
+          return Array.from(new Set(ips));
+        }
         const r = await pve.get(
-          `/nodes/${g.node}/qemu/${g.vmid}/agent/network-get-interfaces`,
+          `/nodes/${g.node}/lxc/${g.vmid}/interfaces`,
           { timeout: 3000 }
         );
-        const ifaces = r.data.data.result || [];
         const ips = [];
-        ifaces.forEach((i) => {
+        (r.data.data || []).forEach((i) => {
           if (i.name === 'lo') return;
-          extractIps(i['ip-addresses']).forEach((ip) => ips.push(ip));
+          if (i.inet) {
+            const ip = String(i.inet).split('/')[0];
+            if (ip && !ip.startsWith('127.')) ips.push(ip);
+          }
         });
-        return [key, Array.from(new Set(ips))];
-      }
-      const r = await pve.get(
-        `/nodes/${g.node}/lxc/${g.vmid}/interfaces`,
-        { timeout: 3000 }
-      );
-      const ifaces = r.data.data || [];
-      const ips = [];
-      ifaces.forEach((i) => {
-        if (i.name === 'lo') return;
-        if (i.inet) {
-          const ip = String(i.inet).split('/')[0];
-          if (ip && !ip.startsWith('127.')) ips.push(ip);
-        }
-      });
-      return [key, Array.from(new Set(ips))];
+        return Array.from(new Set(ips));
+      } catch { return []; }
+    }
+    async function fetchOs(g) {
+      try {
+        const r = await pve.get(
+          `/nodes/${g.node}/${g.type}/${g.vmid}/config`,
+          { timeout: 3000 }
+        );
+        return osFamily(r.data.data?.ostype);
+      } catch { return null; }
+    }
+
+    const results = await Promise.allSettled(guests.map(async (g) => {
+      const key = `${g.type}/${g.vmid}/${g.node}`;
+      const [ips, os] = await Promise.all([fetchIps(g), fetchOs(g)]);
+      return [key, { ips, os }];
     }));
 
     const map = {};
     results.forEach((r) => {
       if (r.status === 'fulfilled') {
-        const [key, ips] = r.value;
-        if (ips.length) map[key] = ips;
+        const [key, info] = r.value;
+        if ((info.ips && info.ips.length) || info.os) map[key] = info;
       }
     });
     return map;
