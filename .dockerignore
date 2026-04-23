@@ -1,0 +1,17 @@
+node_modules
+.env
+.env.*
+.state
+.omc
+.git
+.gitignore
+.DS_Store
+.vscode
+.idea
+*.log
+README*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+install.sh
+deploy.js

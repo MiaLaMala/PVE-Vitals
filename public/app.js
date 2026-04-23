@@ -23,6 +23,11 @@ const state = {
   guestInfo: {},
   guestBackups: {},
   notBackedUp: [],
+  ha: [],
+  ceph: null,
+  replication: [],
+  enableSound: false,
+  lastWorstSev: 'ok',
   timeframe: 'hour',
   timeframeCycle: ['hour', 'day', 'week'],
   timeframeIdx: 0,
@@ -69,6 +74,14 @@ const i18n = {
     backupAll: 'all guests',
     lastBackup: 'Backup',
     noBackupAlert: (n) => n === 1 ? '1 guest without backup' : `${n} guests without backup`,
+    cephWarnAlert: 'Ceph health: warning',
+    cephCritAlert: 'Ceph health: error',
+    haAlert: (n) => n === 1 ? '1 HA service in error state' : `${n} HA services in error state`,
+    replicationAlert: (n) => n === 1 ? '1 replication job failing' : `${n} replication jobs failing`,
+    summaryNodes: 'Nodes',
+    summaryGuests: 'Guests',
+    summaryCPU: 'CPU',
+    summaryRAM: 'RAM',
   },
   de: {
     cluster: 'Cluster',
@@ -107,6 +120,14 @@ const i18n = {
     backupAll: 'alle Gäste',
     lastBackup: 'Backup',
     noBackupAlert: (n) => n === 1 ? '1 Gast ohne Backup' : `${n} Gäste ohne Backup`,
+    cephWarnAlert: 'Ceph-Status: Warnung',
+    cephCritAlert: 'Ceph-Status: Fehler',
+    haAlert: (n) => n === 1 ? '1 HA-Dienst im Fehlerzustand' : `${n} HA-Dienste im Fehlerzustand`,
+    replicationAlert: (n) => n === 1 ? '1 Replikations-Job fehlgeschlagen' : `${n} Replikations-Jobs fehlgeschlagen`,
+    summaryNodes: 'Knoten',
+    summaryGuests: 'Gäste',
+    summaryCPU: 'CPU',
+    summaryRAM: 'RAM',
   },
 };
 
@@ -117,7 +138,7 @@ const i18n = {
 // device hides the alert on every viewer at the next refresh.
 async function ackTaskAlertsNow() {
   try {
-    const r = await fetch('/api/ack', { method: 'POST' });
+    const r = await fetch('/api/ack', { method: 'POST', headers: authHeaders() });
     const j = await r.json();
     if (j.ok && j.data) state.tasksAckedUntil = j.data.tasksAckedUntil;
   } catch (e) {
@@ -201,8 +222,15 @@ function applyI18n() {
 }
 
 // ==== API ===================================================================
-async function api(path) {
-  const r = await fetch(path);
+// Token, if present in the URL, is sent on every request so DASHBOARD_TOKEN
+// deployments work from a bookmarkable URL like http://host:3000/?token=xxx.
+const urlToken = new URLSearchParams(location.search).get('token') || '';
+function authHeaders() {
+  return urlToken ? { Authorization: `Bearer ${urlToken}` } : {};
+}
+async function api(path, opts = {}) {
+  const headers = Object.assign({}, authHeaders(), opts.headers || {});
+  const r = await fetch(path, { ...opts, headers });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || 'API error');
@@ -212,7 +240,7 @@ async function api(path) {
 // ==== Data fetch ============================================================
 async function fetchAll() {
   try {
-    const [nodes, resources, ack, backupJobs, guestInfo, guestBackups, notBackedUp] = await Promise.all([
+    const [nodes, resources, ack, backupJobs, guestInfo, guestBackups, notBackedUp, ha, ceph, replication] = await Promise.all([
       api('/api/nodes'),
       api('/api/cluster/resources'),
       api('/api/ack').catch(() => ({ tasksAckedUntil: 0 })),
@@ -220,6 +248,9 @@ async function fetchAll() {
       api('/api/guests/info').catch(() => ({})),
       api('/api/guests/backups').catch(() => ({})),
       api('/api/cluster/not-backed-up').catch(() => []),
+      api('/api/cluster/ha').catch(() => []),
+      api('/api/cluster/ceph').catch(() => null),
+      api('/api/cluster/replication').catch(() => []),
     ]);
     state.nodes = nodes;
     state.resources = resources;
@@ -228,6 +259,9 @@ async function fetchAll() {
     state.guestInfo = guestInfo || {};
     state.guestBackups = guestBackups || {};
     state.notBackedUp = notBackedUp || [];
+    state.ha = ha || [];
+    state.ceph = ceph || null;
+    state.replication = replication || [];
 
     await Promise.all(nodes.map(async (n) => {
       if (n.status !== 'online') return;
@@ -303,6 +337,23 @@ function computeAlerts() {
     alerts.push({ sev: 'warn', msg: t('noBackupAlert', state.notBackedUp.length) });
   }
 
+  // Ceph health (if configured)
+  const cephStatus = state.ceph?.health?.status;
+  if (cephStatus === 'HEALTH_ERR') alerts.push({ sev: 'crit', msg: t('cephCritAlert') });
+  else if (cephStatus === 'HEALTH_WARN') alerts.push({ sev: 'warn', msg: t('cephWarnAlert') });
+
+  // HA services in error/fence state
+  const haErr = (state.ha || []).filter((h) =>
+    h.type === 'service' && ['error', 'fence'].includes(h.state)
+  );
+  if (haErr.length > 0) alerts.push({ sev: 'warn', msg: t('haAlert', haErr.length) });
+
+  // Failed storage replication jobs
+  const replErr = (state.replication || []).filter((r) =>
+    r.state === 'error' || Number(r.fail_count) > 0
+  );
+  if (replErr.length > 0) alerts.push({ sev: 'warn', msg: t('replicationAlert', replErr.length) });
+
   return alerts;
 }
 
@@ -323,6 +374,13 @@ function renderTopBar() {
               : worst === 'warn' ? t('healthWarn')
               : t('healthOk');
   health.querySelector('.health-text').textContent = label;
+
+  // Beep on transition into CRIT, if sound is enabled and the audio context
+  // has been unlocked by a user gesture. Silent failure otherwise.
+  if (state.enableSound && worst === 'crit' && state.lastWorstSev !== 'crit') {
+    playAlertSound();
+  }
+  state.lastWorstSev = worst;
 
   const alertsEl = $('alerts');
   if (alerts.length) {
@@ -670,6 +728,31 @@ function renderTasks() {
   }).join('');
 }
 
+// ==== Render: cluster summary strip ========================================
+function renderClusterSummary() {
+  const el = $('cluster-summary');
+  if (!el) return;
+  const guests = state.resources.filter((r) => r.type === 'qemu' || r.type === 'lxc');
+  if (!guests.length && !state.nodes.length) { el.hidden = true; el.innerHTML = ''; return; }
+  const runningGuests = guests.filter((v) => v.status === 'running').length;
+  const onlineNodes = state.nodes.filter((n) => n.status === 'online').length;
+  const cpuUsed = state.nodes.reduce((s, n) => s + (n.cpu || 0) * (n.maxcpu || 0), 0);
+  const cpuTotal = state.nodes.reduce((s, n) => s + (n.maxcpu || 0), 0);
+  const memUsed = state.nodes.reduce((s, n) => s + (n.mem || 0), 0);
+  const memTotal = state.nodes.reduce((s, n) => s + (n.maxmem || 0), 0);
+
+  const chip = (label, value) =>
+    `<div class="cs-chip"><span class="cs-label">${esc(label)}</span><span class="cs-value">${esc(value)}</span></div>`;
+
+  el.hidden = false;
+  el.innerHTML = [
+    chip(t('summaryNodes'), `${onlineNodes}/${state.nodes.length}`),
+    chip(t('summaryGuests'), `${runningGuests}/${guests.length}`),
+    cpuTotal > 0 ? chip(t('summaryCPU'), `${cpuUsed.toFixed(1)} / ${cpuTotal}`) : '',
+    memTotal > 0 ? chip(t('summaryRAM'), `${fmtBytes(memUsed)} / ${fmtBytes(memTotal)}`) : '',
+  ].filter(Boolean).join('');
+}
+
 // ==== Render: backup jobs strip ============================================
 function renderBackupJobs() {
   const el = $('backup-strip');
@@ -689,6 +772,7 @@ function renderBackupJobs() {
 // ==== Render orchestrator ===================================================
 function render() {
   renderTopBar();
+  renderClusterSummary();
   renderBackupJobs();
   renderNodes();
   renderVMs();
@@ -707,6 +791,50 @@ function pickLang(serverDefault, forceLang) {
   if (nav.startsWith('de')) return 'de';
   if (nav.startsWith('en')) return 'en';
   return serverDefault || 'en';
+}
+
+// ==== Sound on CRIT (opt-in via ENABLE_SOUND) ==============================
+// Browsers require a user gesture to unlock AudioContext; we register a
+// one-time listener that primes it on the first click or key press.
+let audioCtx = null;
+function ensureAudio() {
+  if (audioCtx || !window.AudioContext) return;
+  try { audioCtx = new AudioContext(); } catch {}
+}
+function playAlertSound() {
+  ensureAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  try {
+    const now = audioCtx.currentTime;
+    [880, 660].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + i * 0.22);
+      gain.gain.linearRampToValueAtTime(0.18, now + i * 0.22 + 0.02);
+      gain.gain.linearRampToValueAtTime(0, now + i * 0.22 + 0.2);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now + i * 0.22);
+      osc.stop(now + i * 0.22 + 0.25);
+    });
+  } catch {}
+}
+
+// ==== Fullscreen toggle (F key) ============================================
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen().catch(() => {});
+}
+
+// ==== Theme ================================================================
+function applyTheme(theme) {
+  let resolved = theme;
+  if (!['light', 'dark'].includes(resolved)) {
+    resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = resolved;
 }
 
 // Auto-scroll long panel bodies so wall-monitor viewers see all content.
@@ -734,6 +862,7 @@ function startAutoScroll(intervalSec) {
 
 async function init() {
   let autoScrollInterval = 15;
+  let theme = new URLSearchParams(location.search).get('theme') || 'auto';
   try {
     const cfg = await api('/api/config');
     if (cfg.thresholds) state.thresholds = cfg.thresholds;
@@ -741,13 +870,34 @@ async function init() {
     if (cfg.cacheTtl) state.refreshMs = Math.max(5000, cfg.cacheTtl * 1000);
     state.hostInfo = cfg.hostInfo || null;
     if (typeof cfg.autoScrollInterval === 'number') autoScrollInterval = cfg.autoScrollInterval;
+    state.enableSound = !!cfg.enableSound;
+    if (theme === 'auto' && cfg.defaultTheme) theme = cfg.defaultTheme;
   } catch {
     state.lang = pickLang('en', null);
   }
 
+  applyTheme(theme);
   applyI18n();
   renderAttribution();
   renderClock();
+
+  // Prime audio on first user gesture so beeps work without prompts.
+  if (state.enableSound) {
+    const once = () => {
+      ensureAudio();
+      document.removeEventListener('click', once);
+      document.removeEventListener('keydown', once);
+    };
+    document.addEventListener('click', once, { once: true });
+    document.addEventListener('keydown', once, { once: true });
+  }
+
+  // Keyboard shortcuts: F toggles fullscreen.
+  window.addEventListener('keydown', (e) => {
+    if (e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+  });
+
   await fetchAll();
 
   setInterval(fetchAll, state.refreshMs);

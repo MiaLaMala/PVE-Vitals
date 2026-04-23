@@ -7,6 +7,15 @@ Designed to live on a dedicated monitor so you can glance across the room and in
 
 Looking for the German readme? See [README.de.md](README.de.md).
 
+## Run with Docker
+
+```bash
+cp .env.example .env     # fill in PVE_HOST / tokens
+docker compose up -d --build
+```
+
+The compose file mounts a named volume for `.state/` so the shared alert-ack timestamp survives restarts.
+
 ## One-line install (Debian or Ubuntu)
 
 Run this on the machine that will host the display (a Debian 12 LXC on your Proxmox host is the recommended target):
@@ -190,6 +199,25 @@ The Proxmox UI is powerful, but it is:
 - Dense with information no one in the room cares about at 3am
 
 PVE Vitals is the opposite: one page, no login, tuned for peripheral vision. It answers exactly one question: "is anything wrong right now?"
+
+## Prometheus
+
+A `/metrics` endpoint exposes node and guest metrics in Prometheus text format. Example scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: pve-vitals
+    static_configs:
+      - targets: ['pve-vitals.lan:3000']
+    # Required only when DASHBOARD_TOKEN is set:
+    authorization:
+      type: Bearer
+      credentials: your-token-here
+```
+
+## Optional auth
+
+Set `DASHBOARD_TOKEN=<secret>` in `.env` to gate `/api/*` and `/metrics`. The dashboard URL then needs `?token=<secret>` for the browser, and scrapers send `Authorization: Bearer <secret>`.
 
 ## Credits
 

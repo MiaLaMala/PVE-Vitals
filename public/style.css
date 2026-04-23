@@ -39,10 +39,29 @@ body {
 .app {
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto 1fr;
   gap: 12px;
   padding: 14px;
   animation: drift 900s infinite linear;
+}
+
+/* ==== Light theme ========================================================= */
+:root[data-theme="light"] {
+  --bg:      #f3f4f6;
+  --bg1:     #ffffff;
+  --bg2:     #fafbfd;
+  --bg3:     #eef1f5;
+  --border:  #d1d5dc;
+  --text:    #15181f;
+  --text2:   #565c68;
+  --text3:   #9298a5;
+  --shadow:  0 4px 16px rgba(15, 20, 30, .08);
+}
+:root[data-theme="light"] .app {
+  background: var(--bg);
+}
+:root[data-theme="light"] .topbar {
+  background: linear-gradient(180deg, var(--bg1), var(--bg2));
 }
 
 /* ==== Top bar ============================================================ */
@@ -150,6 +169,40 @@ body {
 }
 .alert-ack:hover,
 .alert-ack:focus-visible { color: var(--text); border-color: var(--accent); background: var(--bg2); outline: none; }
+
+/* ==== Cluster summary strip ============================================== */
+.cluster-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.cluster-summary[hidden] { display: none; }
+.cs-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  font-variant-numeric: tabular-nums;
+}
+.cs-label {
+  font-size: 10px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+}
+.cs-value {
+  font-weight: 700;
+  color: var(--text);
+}
 
 /* ==== Backup-job strip =================================================== */
 .backup-strip {

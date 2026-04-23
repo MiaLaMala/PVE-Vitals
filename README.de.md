@@ -7,6 +7,15 @@ Entworfen für einen fest montierten Monitor, damit du im Vorbeigehen sofort sie
 
 English readme: [README.md](README.md).
 
+## Start mit Docker
+
+```bash
+cp .env.example .env     # PVE-Zugangsdaten eintragen
+docker compose up -d --build
+```
+
+Die Compose-Datei mountet ein benanntes Volume für `.state/`, damit der geräteübergreifend synchronisierte Ack-Zeitstempel Neustarts überlebt.
+
 ## Installation per Einzeiler (Debian oder Ubuntu)
 
 Auf dem Gerät ausführen, das den Monitor antreiben soll (ein Debian 12 LXC auf deinem Proxmox-Host ist das empfohlene Ziel):
@@ -190,6 +199,25 @@ Die eingebaute Oberfläche ist mächtig, aber:
 - zeigt viele Details, die für einen Überblick zu viel sind
 
 PVE Vitals ist das Gegenteil: eine Seite, kein Login, optimiert für das Auge im Vorbeigehen. Sie beantwortet genau eine Frage: "Ist gerade irgendwas kaputt?"
+
+## Prometheus
+
+Ein `/metrics`-Endpoint liefert Knoten- und Gast-Metriken im Prometheus-Textformat. Beispiel-Scrape:
+
+```yaml
+scrape_configs:
+  - job_name: pve-vitals
+    static_configs:
+      - targets: ['pve-vitals.lan:3000']
+    # Nur nötig wenn DASHBOARD_TOKEN gesetzt ist:
+    authorization:
+      type: Bearer
+      credentials: dein-token
+```
+
+## Optionale Authentifizierung
+
+`DASHBOARD_TOKEN=<geheim>` in der `.env` schützt `/api/*` und `/metrics`. Der Dashboard-Aufruf im Browser braucht dann `?token=<geheim>`, Scraper schicken `Authorization: Bearer <geheim>`.
 
 ## Credits
 

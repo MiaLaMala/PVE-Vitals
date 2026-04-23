@@ -1,0 +1,14 @@
+services:
+  pve-vitals:
+    build: .
+    image: pve-vitals:latest
+    container_name: pve-vitals
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - pve-vitals-state:/app/.state
+
+volumes:
+  pve-vitals-state:

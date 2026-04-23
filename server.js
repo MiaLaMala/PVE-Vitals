@@ -22,6 +22,10 @@ const FORCE_LANG_RAW = (process.env.FORCE_LANG || '').toLowerCase();
 const FORCE_LANG = (FORCE_LANG_RAW === 'de' || FORCE_LANG_RAW === 'en') ? FORCE_LANG_RAW : null;
 const SHOW_HOST_INFO = (process.env.SHOW_HOST_INFO || 'false').toLowerCase() === 'true';
 const AUTO_SCROLL_INTERVAL = Math.max(0, parseInt(process.env.AUTO_SCROLL_INTERVAL || '15', 10) || 0);
+const ENABLE_SOUND = (process.env.ENABLE_SOUND || 'false').toLowerCase() === 'true';
+const DEFAULT_THEME = ['light', 'dark', 'auto'].includes((process.env.DEFAULT_THEME || 'auto').toLowerCase())
+  ? (process.env.DEFAULT_THEME || 'auto').toLowerCase() : 'auto';
+const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN ? String(process.env.DASHBOARD_TOKEN) : null;
 
 const thresholds = {
   cpuWarn:     parseInt(process.env.CPU_WARN     || '80'),
@@ -88,8 +92,24 @@ function safeGet(fetcher) {
   };
 }
 
+// ==== Auth middleware (only active if DASHBOARD_TOKEN is set) ===============
+// Accepts the token via Authorization: Bearer <t> header or ?token=<t> query.
+// Gates /api/* and /metrics. Static assets (HTML, CSS, JS, SVG) stay public
+// so the kiosk can boot; the token is then used on every data request.
+function authMiddleware(req, res, next) {
+  if (!DASHBOARD_TOKEN) return next();
+  const auth = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  const given = m ? m[1] : (req.query.token || '');
+  if (given !== DASHBOARD_TOKEN) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  next();
+}
+
 // ==== Static frontend =======================================================
 app.use(express.json({ limit: '1kb' }));
+app.use(['/api', '/metrics'], authMiddleware);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==== Public UI config ======================================================
@@ -102,6 +122,9 @@ app.get('/api/config', (req, res) => {
       forceLang: FORCE_LANG,
       cacheTtl: CACHE_TTL,
       autoScrollInterval: AUTO_SCROLL_INTERVAL,
+      enableSound: ENABLE_SOUND,
+      defaultTheme: DEFAULT_THEME,
+      authRequired: DASHBOARD_TOKEN !== null,
       hostInfo: SHOW_HOST_INFO ? { pve: `${PVE_HOST}:${PVE_PORT}` } : null,
     },
   });
@@ -138,6 +161,39 @@ app.get('/api/nodes/:node/tasks', safeGet(async (req) =>
 
 app.get('/api/cluster/resources', safeGet(async () =>
   cachedGet('resources', CACHE_TTL, async () => (await pve.get('/cluster/resources')).data.data)
+));
+
+// High-availability service status. Empty if HA is not configured.
+app.get('/api/cluster/ha', safeGet(async () =>
+  cachedGet('ha', 30, async () => {
+    try { return (await pve.get('/cluster/ha/status/current')).data.data || []; }
+    catch { return []; }
+  })
+));
+
+// Ceph cluster health. Null if Ceph is not configured.
+app.get('/api/cluster/ceph', safeGet(async () =>
+  cachedGet('ceph', 30, async () => {
+    try { return (await pve.get('/cluster/ceph/status')).data.data || null; }
+    catch { return null; }
+  })
+));
+
+// Storage replication jobs across every node. Empty if not used.
+app.get('/api/cluster/replication', safeGet(async () =>
+  cachedGet('replication', 30, async () => {
+    let nodes = [];
+    try { nodes = (await pve.get('/nodes')).data.data || []; } catch { return []; }
+    const all = [];
+    await Promise.all(nodes.map(async (n) => {
+      if (n.status !== 'online') return;
+      try {
+        const r = await pve.get(`/nodes/${n.node}/replication`);
+        (r.data.data || []).forEach((j) => all.push({ node: n.node, ...j }));
+      } catch { /* ignore */ }
+    }));
+    return all;
+  })
 ));
 
 // ==== Backup jobs & guest info =============================================
@@ -280,6 +336,67 @@ app.post('/api/ack', (req, res) => {
   } catch (e) {
     console.error('[api] /api/ack write failed:', e.message);
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ==== Prometheus metrics ====================================================
+// Plain-text exposition for Prometheus scrapers. Reuses the same NodeCache as
+// the dashboard UI, so scraping at 15s costs no extra PVE API calls.
+function promEscape(s) {
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+app.get('/metrics', async (req, res) => {
+  try {
+    const [nodes, resources] = await Promise.all([
+      cachedGet('nodes', CACHE_TTL, async () => (await pve.get('/nodes')).data.data),
+      cachedGet('resources', CACHE_TTL, async () => (await pve.get('/cluster/resources')).data.data),
+    ]);
+    const lines = [];
+    const help = (name, desc, type = 'gauge') => {
+      lines.push(`# HELP ${name} ${desc}`);
+      lines.push(`# TYPE ${name} ${type}`);
+    };
+
+    help('pve_node_up', 'Node online status (1=online, 0=offline)');
+    nodes.forEach((n) => lines.push(
+      `pve_node_up{node="${promEscape(n.node)}"} ${n.status === 'online' ? 1 : 0}`
+    ));
+    help('pve_node_cpu_ratio', 'Node CPU usage ratio (0..1)');
+    nodes.forEach((n) => lines.push(
+      `pve_node_cpu_ratio{node="${promEscape(n.node)}"} ${n.cpu || 0}`
+    ));
+    help('pve_node_memory_used_bytes', 'Node used memory in bytes');
+    nodes.forEach((n) => lines.push(
+      `pve_node_memory_used_bytes{node="${promEscape(n.node)}"} ${n.mem || 0}`
+    ));
+    help('pve_node_memory_total_bytes', 'Node total memory in bytes');
+    nodes.forEach((n) => lines.push(
+      `pve_node_memory_total_bytes{node="${promEscape(n.node)}"} ${n.maxmem || 0}`
+    ));
+    help('pve_node_disk_used_bytes', 'Node root-disk used bytes');
+    nodes.forEach((n) => lines.push(
+      `pve_node_disk_used_bytes{node="${promEscape(n.node)}"} ${n.disk || 0}`
+    ));
+    help('pve_node_disk_total_bytes', 'Node root-disk total bytes');
+    nodes.forEach((n) => lines.push(
+      `pve_node_disk_total_bytes{node="${promEscape(n.node)}"} ${n.maxdisk || 0}`
+    ));
+    help('pve_node_uptime_seconds', 'Node uptime in seconds');
+    nodes.forEach((n) => lines.push(
+      `pve_node_uptime_seconds{node="${promEscape(n.node)}"} ${n.uptime || 0}`
+    ));
+
+    help('pve_guest_running', 'Guest running state (1=running, 0=stopped)');
+    resources
+      .filter((r) => r.type === 'qemu' || r.type === 'lxc')
+      .forEach((v) => {
+        const lbl = `type="${promEscape(v.type)}",vmid="${promEscape(v.vmid)}",name="${promEscape(v.name || '')}",node="${promEscape(v.node || '')}"`;
+        lines.push(`pve_guest_running{${lbl}} ${v.status === 'running' ? 1 : 0}`);
+      });
+
+    res.type('text/plain; version=0.0.4').send(lines.join('\n') + '\n');
+  } catch (e) {
+    res.status(502).type('text/plain').send(`# error: ${e.message}\n`);
   }
 });
 
