@@ -1,11 +1,11 @@
 'use strict';
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
 const NodeCache = require('node-cache');
-const path = require('path');
 
 const app = express();
 

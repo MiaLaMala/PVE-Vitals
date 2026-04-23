@@ -155,11 +155,9 @@ fi
 # ==== PM2 ===================================================================
 say "Starting PVE Vitals under PM2"
 cd "$INSTALL_DIR"
-if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
-  pm2 restart "$PM2_NAME" --update-env >/dev/null
-else
-  pm2 start server.js --name "$PM2_NAME" >/dev/null
-fi
+# Recreate the process on each run so cwd and env are guaranteed fresh.
+pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
+pm2 start server.js --name "$PM2_NAME" --cwd "$INSTALL_DIR" >/dev/null
 pm2 save >/dev/null
 
 if ! systemctl list-unit-files 2>/dev/null | grep -q '^pm2-root\.service'; then
