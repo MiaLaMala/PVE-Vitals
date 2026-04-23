@@ -4,8 +4,8 @@ const http = require('http');
 
 const SECRET = process.env.DEPLOY_SECRET;
 const PORT = process.env.DEPLOY_PORT || 4000;
-const REPO_PATH = process.env.REPO_PATH || '/opt/pve-status';
-const PM2_APP = process.env.PM2_APP || 'proxmox-dashboard';
+const REPO_PATH = process.env.REPO_PATH || '/opt/pve-vitals';
+const PM2_APP = process.env.PM2_APP || 'pve-vitals';
 
 if (!SECRET) {
   console.error('DEPLOY_SECRET env var is required');
