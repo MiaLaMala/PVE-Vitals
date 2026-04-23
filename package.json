@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Always-on, read-only Proxmox status wall display. Green means fine, red means go look.",
   "main": "server.js",
+  "author": "Mia Grünwald",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"

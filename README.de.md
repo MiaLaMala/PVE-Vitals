@@ -78,6 +78,10 @@ DISK_CRIT=95
 STORAGE_WARN=85
 STORAGE_CRIT=95
 DEFAULT_LANG=de
+
+# Zeigt Proxmox- und Dashboard-Adresse in der Fußzeile an.
+# Standard aus. Nur aktivieren, wenn der Monitor nicht öffentlich einsehbar ist.
+SHOW_HOST_INFO=false
 ```
 
 ### 3. Installieren und starten
@@ -178,6 +182,12 @@ Die eingebaute Oberfläche ist mächtig, aber:
 - zeigt viele Details, die für einen Überblick zu viel sind
 
 PVE Vitals ist das Gegenteil: eine Seite, kein Login, optimiert für das Auge im Vorbeigehen. Sie beantwortet genau eine Frage: "Ist gerade irgendwas kaputt?"
+
+## Credits
+
+Entwickelt von **Mia Grünwald**.
+
+Quellcode: https://github.com/MiaLaMala/PVE-Vitals
 
 ## Lizenz
 

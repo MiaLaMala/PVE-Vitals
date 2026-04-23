@@ -78,6 +78,10 @@ DISK_CRIT=95
 STORAGE_WARN=85
 STORAGE_CRIT=95
 DEFAULT_LANG=en
+
+# Show the Proxmox and dashboard addresses in the on-screen footer.
+# Default off. Only enable if the monitor is physically private.
+SHOW_HOST_INFO=false
 ```
 
 ### 3. Install and run
@@ -178,6 +182,12 @@ The Proxmox UI is powerful, but it is:
 - Dense with information no one in the room cares about at 3am
 
 PVE Vitals is the opposite: one page, no login, tuned for peripheral vision. It answers exactly one question: "is anything wrong right now?"
+
+## Credits
+
+Built by **Mia Grünwald**.
+
+Source: https://github.com/MiaLaMala/PVE-Vitals
 
 ## License
 

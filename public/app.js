@@ -17,6 +17,7 @@ const state = {
   tasks: {},
   storage: {},
   nodeDetail: {},
+  hostInfo: null,
   timeframe: 'hour',
   timeframeCycle: ['hour', 'day', 'week'],
   timeframeIdx: 0,
@@ -145,6 +146,18 @@ function sevForPct(p, warn, crit) {
 function maxSev(...sevs) {
   const order = { ok: 0, warn: 1, crit: 2 };
   return sevs.reduce((a, b) => (order[b] > order[a] ? b : a), 'ok');
+}
+
+// ==== Attribution footer ====================================================
+function renderAttribution() {
+  const el = $('attribution');
+  if (!el) return;
+  const parts = ['by Mia Grünwald'];
+  if (state.hostInfo?.pve) {
+    parts.push(`PVE ${state.hostInfo.pve}`);
+    parts.push(`Dashboard ${window.location.host}`);
+  }
+  el.textContent = parts.join(' · ');
 }
 
 // ==== I18n application ======================================================
@@ -576,11 +589,13 @@ async function init() {
     if (cfg.thresholds) state.thresholds = cfg.thresholds;
     state.lang = pickLang(cfg.defaultLang);
     if (cfg.cacheTtl) state.refreshMs = Math.max(5000, cfg.cacheTtl * 1000);
+    state.hostInfo = cfg.hostInfo || null;
   } catch {
     state.lang = pickLang('en');
   }
 
   applyI18n();
+  renderAttribution();
   renderClock();
   await fetchAll();
 
