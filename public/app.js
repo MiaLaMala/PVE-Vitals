@@ -523,14 +523,18 @@ function tagHue(s) {
   return h % 360;
 }
 
-// Compact inline SVG icons. Inherit color via currentColor / fill.
-const OS_ICONS = {
-  windows: '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></svg>',
-  linux:   '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="4.5" rx="3" ry="3.5"/><ellipse cx="8" cy="11" rx="4.5" ry="4.5"/><circle cx="6.5" cy="4" r=".9" fill="#0b0d12"/><circle cx="9.5" cy="4" r=".9" fill="#0b0d12"/></svg>',
-  bsd:     '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M5 6 L8 9 L11 6" stroke="#0b0d12" stroke-width="1.5" fill="none"/></svg>',
-  solaris: '<svg class="os-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>',
+// External SVG assets bundled in /public. Rendered via <img> so each icon
+// keeps its own colors (Tux, Microsoft, FreeBSD daemon, etc).
+const OS_ICON_FILES = {
+  windows: '/microsoft-svgrepo-com.svg',
+  linux:   '/linux-svgrepo-com.svg',
+  bsd:     '/freebsd-icon.svg',
 };
-function osIcon(os) { return OS_ICONS[os] || ''; }
+const UNKNOWN_OS_ICON = '/unknown-os-svgrepo-com.svg';
+function osIcon(os) {
+  const src = OS_ICON_FILES[os] || UNKNOWN_OS_ICON;
+  return `<img class="os-icon" src="${src}" alt="${esc(os || 'unknown')}" aria-hidden="true">`;
+}
 
 // ==== Render: VMs panel ====================================================
 function renderVMs() {
@@ -705,13 +709,38 @@ function pickLang(serverDefault, forceLang) {
   return serverDefault || 'en';
 }
 
+// Auto-scroll long panel bodies so wall-monitor viewers see all content.
+// Pauses on hover, disabled if prefers-reduced-motion, disabled if the panel
+// content fits without overflow. Panel starts are staggered so they don't
+// all scroll in lockstep, which would feel hypnotic.
+function startAutoScroll(intervalSec) {
+  if (!intervalSec || intervalSec <= 0) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.querySelectorAll('.panel-body').forEach((body, idx) => {
+    let paused = false;
+    body.addEventListener('mouseenter', () => { paused = true; });
+    body.addEventListener('mouseleave', () => { paused = false; });
+    setTimeout(() => {
+      setInterval(() => {
+        if (paused) return;
+        if (body.scrollHeight <= body.clientHeight + 4) return;
+        const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 8;
+        const next = atBottom ? 0 : body.scrollTop + body.clientHeight - 24;
+        body.scrollTo({ top: next, behavior: 'smooth' });
+      }, intervalSec * 1000);
+    }, idx * 2500);
+  });
+}
+
 async function init() {
+  let autoScrollInterval = 15;
   try {
     const cfg = await api('/api/config');
     if (cfg.thresholds) state.thresholds = cfg.thresholds;
     state.lang = pickLang(cfg.defaultLang, cfg.forceLang);
     if (cfg.cacheTtl) state.refreshMs = Math.max(5000, cfg.cacheTtl * 1000);
     state.hostInfo = cfg.hostInfo || null;
+    if (typeof cfg.autoScrollInterval === 'number') autoScrollInterval = cfg.autoScrollInterval;
   } catch {
     state.lang = pickLang('en', null);
   }
@@ -737,6 +766,8 @@ async function init() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => state.nodes.forEach((n) => drawSparks(n.node)), 150);
   });
+
+  startAutoScroll(autoScrollInterval);
 }
 
 init();

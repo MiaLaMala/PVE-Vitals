@@ -21,6 +21,7 @@ const DEFAULT_LANG = (process.env.DEFAULT_LANG || 'en').toLowerCase().startsWith
 const FORCE_LANG_RAW = (process.env.FORCE_LANG || '').toLowerCase();
 const FORCE_LANG = (FORCE_LANG_RAW === 'de' || FORCE_LANG_RAW === 'en') ? FORCE_LANG_RAW : null;
 const SHOW_HOST_INFO = (process.env.SHOW_HOST_INFO || 'false').toLowerCase() === 'true';
+const AUTO_SCROLL_INTERVAL = Math.max(0, parseInt(process.env.AUTO_SCROLL_INTERVAL || '15', 10) || 0);
 
 const thresholds = {
   cpuWarn:     parseInt(process.env.CPU_WARN     || '80'),
@@ -100,6 +101,7 @@ app.get('/api/config', (req, res) => {
       defaultLang: DEFAULT_LANG,
       forceLang: FORCE_LANG,
       cacheTtl: CACHE_TTL,
+      autoScrollInterval: AUTO_SCROLL_INTERVAL,
       hostInfo: SHOW_HOST_INFO ? { pve: `${PVE_HOST}:${PVE_PORT}` } : null,
     },
   });
