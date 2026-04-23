@@ -79,6 +79,9 @@ STORAGE_WARN=85
 STORAGE_CRIT=95
 DEFAULT_LANG=de
 
+# Erzwingt eine UI-Sprache unabhängig vom Browser. Leer = automatisch erkennen.
+FORCE_LANG=
+
 # Zeigt Proxmox- und Dashboard-Adresse in der Fußzeile an.
 # Standard aus. Nur aktivieren, wenn der Monitor nicht öffentlich einsehbar ist.
 SHOW_HOST_INFO=false
@@ -125,7 +128,12 @@ Einzelne Alarme erscheinen zusätzlich als Chips unter dem Banner.
 
 ## Sprache
 
-Die Oberfläche übernimmt Englisch oder Deutsch aus dem Browser. Per `?lang=de` oder `?lang=en` lässt sich die Sprache erzwingen. Die Voreinstellung steuert `DEFAULT_LANG` in der `.env`.
+Die Oberfläche übernimmt Englisch oder Deutsch aus dem Browser. Reihenfolge:
+
+1. URL `?lang=de` oder `?lang=en` (hat immer Vorrang, nützlich zum schnellen Testen)
+2. `FORCE_LANG=de|en` in der `.env` (sperrt die Sprache unabhängig vom Browser)
+3. Browser-`Accept-Language`
+4. `DEFAULT_LANG=de|en` in der `.env` (letzter Fallback)
 
 ## Auto-Deploy per GitLab Webhook
 

@@ -17,6 +17,8 @@ const PVE_SECRET   = process.env.PVE_SECRET;
 const LISTEN_PORT  = process.env.PORT         || 3000;
 const CACHE_TTL    = parseInt(process.env.CACHE_TTL || '10');
 const DEFAULT_LANG = (process.env.DEFAULT_LANG || 'en').toLowerCase().startsWith('de') ? 'de' : 'en';
+const FORCE_LANG_RAW = (process.env.FORCE_LANG || '').toLowerCase();
+const FORCE_LANG = (FORCE_LANG_RAW === 'de' || FORCE_LANG_RAW === 'en') ? FORCE_LANG_RAW : null;
 const SHOW_HOST_INFO = (process.env.SHOW_HOST_INFO || 'false').toLowerCase() === 'true';
 
 const thresholds = {
@@ -78,6 +80,7 @@ app.get('/api/config', (req, res) => {
     data: {
       thresholds,
       defaultLang: DEFAULT_LANG,
+      forceLang: FORCE_LANG,
       cacheTtl: CACHE_TTL,
       hostInfo: SHOW_HOST_INFO ? { pve: `${PVE_HOST}:${PVE_PORT}` } : null,
     },

@@ -46,7 +46,7 @@ const i18n = {
     stopped: 'stopped',
     uptime: 'Uptime',
     cpu: 'CPU',
-    memory: 'Memory',
+    memory: 'RAM',
     disk: 'Disk',
     rootDisk: 'Root disk',
     empty: 'Nothing to show',
@@ -56,7 +56,7 @@ const i18n = {
     nodeOfflineAlert: (name) => `Node ${name} is offline`,
     storageAlert: (name, pct) => `Storage ${name} at ${pct}%`,
     cpuAlert: (name, pct) => `CPU on ${name} at ${pct}%`,
-    memAlert: (name, pct) => `Memory on ${name} at ${pct}%`,
+    memAlert: (name, pct) => `RAM on ${name} at ${pct}%`,
     diskAlert: (name, pct) => `Disk on ${name} at ${pct}%`,
     taskFailedAlert: (type, node) => `Task ${type} failed on ${node}`,
     markAsRead: 'Mark as read',
@@ -410,12 +410,15 @@ function drawSparks(node) {
   const canvases = document.querySelectorAll(`.spark[data-node="${CSS.escape(node)}"]`);
   canvases.forEach((c) => {
     if (c.dataset.metric === 'cpu') {
+      // Percent metric: lock the y-axis to 0-100 so a steady 5% does not
+      // render pegged at the top of the canvas.
       sparkline(c, `${t('cpu')} ${Math.round(latest(cpuSeries))}%`,
-        [{ data: cpuSeries, color: '#388bfd' }], { fill: true });
+        [{ data: cpuSeries, color: '#388bfd' }], { fill: true, maxOverride: 100 });
     } else if (c.dataset.metric === 'mem') {
       sparkline(c, `${t('memory')} ${Math.round(latest(memSeries))}%`,
-        [{ data: memSeries, color: '#3fb950' }], { fill: true });
+        [{ data: memSeries, color: '#3fb950' }], { fill: true, maxOverride: 100 });
     } else if (c.dataset.metric === 'net') {
+      // Byte rates span orders of magnitude, so auto-scale to max.
       sparkline(c, `↓ ${fmtBytes(latest(netinSeries))}/s   ↑ ${fmtBytes(latest(netoutSeries))}/s`,
         [{ data: netinSeries, color: '#a371f7' }, { data: netoutSeries, color: '#f78166' }]);
     }
@@ -425,7 +428,9 @@ function drawSparks(node) {
 // Draw one or more series on a canvas with a text label.
 // series: [{ data: number[], color: string }]
 // opts.fill: when true, fills the area under each line with a vertical gradient.
-function sparkline(canvas, label, series, { fill = false } = {}) {
+// opts.maxOverride: fix the y-axis to this value instead of auto-scaling.
+//   Use for percent metrics (0-100) so low-but-steady values don't peg the top.
+function sparkline(canvas, label, series, { fill = false, maxOverride = null } = {}) {
   const W = canvas.clientWidth || 200;
   const H = canvas.clientHeight || 48;
   const dpr = window.devicePixelRatio || 1;
@@ -441,7 +446,7 @@ function sparkline(canvas, label, series, { fill = false } = {}) {
 
   const flat = series.flatMap((s) => s.data || []);
   if (flat.length < 2) return;
-  const max = Math.max(...flat, 1);
+  const max = maxOverride ?? Math.max(...flat, 1);
   const top = 16, bot = H - 2;
 
   const tracePath = (data, step) => {
@@ -602,9 +607,12 @@ function render() {
 }
 
 // ==== Init ==================================================================
-function pickLang(serverDefault) {
-  const forced = new URLSearchParams(location.search).get('lang');
-  if (forced === 'de' || forced === 'en') return forced;
+// URL ?lang= wins (useful for ad-hoc testing). FORCE_LANG from .env
+// overrides browser auto-detect. DEFAULT_LANG is the final fallback.
+function pickLang(serverDefault, forceLang) {
+  const urlForced = new URLSearchParams(location.search).get('lang');
+  if (urlForced === 'de' || urlForced === 'en') return urlForced;
+  if (forceLang === 'de' || forceLang === 'en') return forceLang;
   const nav = (navigator.language || '').toLowerCase();
   if (nav.startsWith('de')) return 'de';
   if (nav.startsWith('en')) return 'en';
@@ -615,11 +623,11 @@ async function init() {
   try {
     const cfg = await api('/api/config');
     if (cfg.thresholds) state.thresholds = cfg.thresholds;
-    state.lang = pickLang(cfg.defaultLang);
+    state.lang = pickLang(cfg.defaultLang, cfg.forceLang);
     if (cfg.cacheTtl) state.refreshMs = Math.max(5000, cfg.cacheTtl * 1000);
     state.hostInfo = cfg.hostInfo || null;
   } catch {
-    state.lang = pickLang('en');
+    state.lang = pickLang('en', null);
   }
 
   applyI18n();

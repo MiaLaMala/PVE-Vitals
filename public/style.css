@@ -124,6 +124,7 @@ body {
   max-height: 22vh;
   overflow-y: auto;
 }
+.alerts[hidden] { display: none; }
 .alert {
   padding: 6px 14px;
   border-radius: 999px;

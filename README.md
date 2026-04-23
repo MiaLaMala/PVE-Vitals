@@ -79,6 +79,9 @@ STORAGE_WARN=85
 STORAGE_CRIT=95
 DEFAULT_LANG=en
 
+# Force a UI language regardless of browser. Empty = auto-detect.
+FORCE_LANG=
+
 # Show the Proxmox and dashboard addresses in the on-screen footer.
 # Default off. Only enable if the monitor is physically private.
 SHOW_HOST_INFO=false
@@ -125,7 +128,12 @@ Individual alerts also render as chips directly under the banner.
 
 ## Language
 
-The UI picks English or German from the browser. Force a language by appending `?lang=de` or `?lang=en` to the URL. Set the default with `DEFAULT_LANG` in `.env`.
+The UI picks English or German from the browser. Override order:
+
+1. URL `?lang=de` or `?lang=en` (always wins; useful for quick testing)
+2. `FORCE_LANG=de|en` in `.env` (locks the language regardless of the browser)
+3. Browser `Accept-Language`
+4. `DEFAULT_LANG=de|en` in `.env` (final fallback)
 
 ## Auto-deploy via GitLab webhook
 
