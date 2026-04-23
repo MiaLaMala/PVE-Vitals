@@ -105,6 +105,10 @@ body {
   line-height: 1;
   letter-spacing: .02em;
 }
+.bar-value,
+.storage-pct,
+.mini-bar .num,
+.panel-count { font-variant-numeric: tabular-nums; }
 .meta-updated { font-size: 11px; color: var(--text2); margin-top: 4px; }
 .meta-updated.stale { color: var(--warn); }
 
@@ -365,11 +369,14 @@ body {
 
 /* ==== Responsive ========================================================= */
 @media (max-width: 1100px) {
+  body { overflow: auto; }
+  .app { height: auto; min-height: 100vh; animation: none; }
   .grid {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto auto;
     grid-template-areas: "nodes" "vms" "storage" "tasks";
   }
+  .panel, .panel-body { overflow: visible; }
   .sparks { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 700px) {
@@ -378,9 +385,22 @@ body {
   .sparks { grid-template-columns: 1fr; }
 }
 
+/* Respect reduced-motion preference: kill drift, pulse, and blink animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+
 /* Scale up for large displays (living-room monitors, 2K/4K walls). */
 @media (min-width: 1800px) {
   body { font-size: 17px; }
+  .app { gap: 16px; padding: 20px; }
+  .grid { gap: 18px; }
   .brand-name { font-size: 22px; }
   .meta-clock { font-size: 38px; }
   .panel-title { font-size: 14px; }

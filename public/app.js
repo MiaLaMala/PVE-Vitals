@@ -247,13 +247,13 @@ function computeAlerts() {
 // ==== Render: top bar + alerts =============================================
 function renderTopBar() {
   const clusterRes = state.resources.find((r) => r.type === 'cluster');
-  if (clusterRes?.name) $('cluster-name').textContent = clusterRes.name;
+  if (clusterRes?.name) {
+    $('cluster-name').textContent = clusterRes.name;
+    document.title = `PVE Vitals · ${clusterRes.name}`;
+  }
 
   const alerts = computeAlerts();
-  const worst = alerts.reduce((a, alert) => {
-    const order = { ok: 0, warn: 1, crit: 2 };
-    return order[alert.sev] > order[a] ? alert.sev : a;
-  }, 'ok');
+  const worst = maxSev(...alerts.map((a) => a.sev));
 
   const health = $('health');
   health.className = `health sev-${worst}`;
@@ -365,22 +365,26 @@ function drawSparks(node) {
   const netinSeries = rrd.map((p) => p.netin ?? 0);
   const netoutSeries = rrd.map((p) => p.netout ?? 0);
 
+  const latest = (arr) => arr[arr.length - 1] || 0;
   const canvases = document.querySelectorAll(`.spark[data-node="${CSS.escape(node)}"]`);
   canvases.forEach((c) => {
     if (c.dataset.metric === 'cpu') {
-      sparkline(c, cpuSeries, '#388bfd',
-        `${t('cpu')} ${Math.round(cpuSeries[cpuSeries.length - 1] || 0)}%`);
+      sparkline(c, `${t('cpu')} ${Math.round(latest(cpuSeries))}%`,
+        [{ data: cpuSeries, color: '#388bfd' }], { fill: true });
     } else if (c.dataset.metric === 'mem') {
-      sparkline(c, memSeries, '#3fb950',
-        `${t('memory')} ${Math.round(memSeries[memSeries.length - 1] || 0)}%`);
+      sparkline(c, `${t('memory')} ${Math.round(latest(memSeries))}%`,
+        [{ data: memSeries, color: '#3fb950' }], { fill: true });
     } else if (c.dataset.metric === 'net') {
-      sparklineDual(c, netinSeries, netoutSeries, '#a371f7', '#f78166',
-        `↓ ${fmtBytes(netinSeries[netinSeries.length - 1] || 0)}/s   ↑ ${fmtBytes(netoutSeries[netoutSeries.length - 1] || 0)}/s`);
+      sparkline(c, `↓ ${fmtBytes(latest(netinSeries))}/s   ↑ ${fmtBytes(latest(netoutSeries))}/s`,
+        [{ data: netinSeries, color: '#a371f7' }, { data: netoutSeries, color: '#f78166' }]);
     }
   });
 }
 
-function sparkline(canvas, data, color, label) {
+// Draw one or more series on a canvas with a text label.
+// series: [{ data: number[], color: string }]
+// opts.fill: when true, fills the area under each line with a vertical gradient.
+function sparkline(canvas, label, series, { fill = false } = {}) {
   const W = canvas.clientWidth || 200;
   const H = canvas.clientHeight || 48;
   const dpr = window.devicePixelRatio || 1;
@@ -394,67 +398,38 @@ function sparkline(canvas, data, color, label) {
   ctx.font = '11px -apple-system, system-ui, sans-serif';
   ctx.fillText(label, 6, 12);
 
-  if (!data || data.length < 2) return;
-  const max = Math.max(...data, 1);
-  const step = W / (data.length - 1);
+  const flat = series.flatMap((s) => s.data || []);
+  if (flat.length < 2) return;
+  const max = Math.max(...flat, 1);
   const top = 16, bot = H - 2;
 
-  const grad = ctx.createLinearGradient(0, top, 0, bot);
-  grad.addColorStop(0, color + '55');
-  grad.addColorStop(1, color + '05');
-  ctx.beginPath();
-  data.forEach((v, i) => {
-    const x = i * step;
-    const y = bot - (v / max) * (bot - top);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.lineTo((data.length - 1) * step, bot);
-  ctx.lineTo(0, bot);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  ctx.beginPath();
-  data.forEach((v, i) => {
-    const x = i * step;
-    const y = bot - (v / max) * (bot - top);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
-}
-
-function sparklineDual(canvas, a, b, colA, colB, label) {
-  const W = canvas.clientWidth || 200;
-  const H = canvas.clientHeight || 48;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, W, H);
-
-  ctx.fillStyle = '#8b949e';
-  ctx.font = '11px -apple-system, system-ui, sans-serif';
-  ctx.fillText(label, 6, 12);
-
-  const all = [...a, ...b];
-  if (all.length < 2) return;
-  const max = Math.max(...all, 1);
-  const top = 16, bot = H - 2;
-
-  [{ d: a, c: colA }, { d: b, c: colB }].forEach(({ d, c }) => {
-    if (d.length < 2) return;
-    const step = W / (d.length - 1);
+  const tracePath = (data, step) => {
     ctx.beginPath();
-    d.forEach((v, i) => {
+    data.forEach((v, i) => {
       const x = i * step;
       const y = bot - (v / max) * (bot - top);
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
-    ctx.strokeStyle = c;
+  };
+
+  series.forEach(({ data, color }) => {
+    if (!data || data.length < 2) return;
+    const step = W / (data.length - 1);
+
+    if (fill) {
+      const grad = ctx.createLinearGradient(0, top, 0, bot);
+      grad.addColorStop(0, color + '55');
+      grad.addColorStop(1, color + '05');
+      tracePath(data, step);
+      ctx.lineTo((data.length - 1) * step, bot);
+      ctx.lineTo(0, bot);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    tracePath(data, step);
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.stroke();
