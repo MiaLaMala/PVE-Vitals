@@ -5,6 +5,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
+const fs = require('fs');
 const NodeCache = require('node-cache');
 
 const app = express();
@@ -49,6 +50,22 @@ const pve = axios.create({
 
 const cache = new NodeCache({ stdTTL: CACHE_TTL, checkperiod: Math.max(CACHE_TTL + 5, 15) });
 
+// ==== Shared state (cross-device alert ack) =================================
+const STATE_DIR = path.join(__dirname, '.state');
+const STATE_FILE = path.join(STATE_DIR, 'state.json');
+function readState() {
+  try {
+    const j = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    return { tasksAckedUntil: Number(j.tasksAckedUntil) || 0 };
+  } catch {
+    return { tasksAckedUntil: 0 };
+  }
+}
+function writeState(s) {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+}
+
 // ==== Helpers ===============================================================
 async function cachedGet(key, ttl, fetcher) {
   const hit = cache.get(key);
@@ -71,6 +88,7 @@ function safeGet(fetcher) {
 }
 
 // ==== Static frontend =======================================================
+app.use(express.json({ limit: '1kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==== Public UI config ======================================================
@@ -119,6 +137,21 @@ app.get('/api/nodes/:node/tasks', safeGet(async (req) =>
 app.get('/api/cluster/resources', safeGet(async () =>
   cachedGet('resources', CACHE_TTL, async () => (await pve.get('/cluster/resources')).data.data)
 ));
+
+// ==== Shared alert ack (synced across all viewers) ==========================
+app.get('/api/ack', (req, res) => {
+  res.json({ ok: true, data: readState() });
+});
+app.post('/api/ack', (req, res) => {
+  const s = { tasksAckedUntil: Math.floor(Date.now() / 1000) };
+  try {
+    writeState(s);
+    res.json({ ok: true, data: s });
+  } catch (e) {
+    console.error('[api] /api/ack write failed:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // ==== Start =================================================================
 app.listen(LISTEN_PORT, () => {

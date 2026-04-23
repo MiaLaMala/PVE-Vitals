@@ -18,6 +18,7 @@ const state = {
   storage: {},
   nodeDetail: {},
   hostInfo: null,
+  tasksAckedUntil: 0,
   timeframe: 'hour',
   timeframeCycle: ['hour', 'day', 'week'],
   timeframeIdx: 0,
@@ -100,13 +101,16 @@ const i18n = {
 // ==== Task-alert acknowledgement ===========================================
 // Only task-failure alerts are dismissible. Real-time alerts (node offline,
 // high CPU/RAM/disk/storage) reflect the current state and are not hidden.
-const ACK_KEY = 'pve-vitals:tasks-acked-until';
-function getAckedUntil() {
-  const v = parseInt(localStorage.getItem(ACK_KEY) || '0', 10);
-  return Number.isFinite(v) ? v : 0;
-}
-function ackTaskAlertsNow() {
-  localStorage.setItem(ACK_KEY, String(Math.floor(Date.now() / 1000)));
+// The ack timestamp is stored server-side so clicking "Mark as read" on one
+// device hides the alert on every viewer at the next refresh.
+async function ackTaskAlertsNow() {
+  try {
+    const r = await fetch('/api/ack', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok && j.data) state.tasksAckedUntil = j.data.tasksAckedUntil;
+  } catch (e) {
+    console.error('ack failed:', e);
+  }
   render();
 }
 
@@ -196,12 +200,14 @@ async function api(path) {
 // ==== Data fetch ============================================================
 async function fetchAll() {
   try {
-    const [nodes, resources] = await Promise.all([
+    const [nodes, resources, ack] = await Promise.all([
       api('/api/nodes'),
       api('/api/cluster/resources'),
+      api('/api/ack').catch(() => ({ tasksAckedUntil: 0 })),
     ]);
     state.nodes = nodes;
     state.resources = resources;
+    state.tasksAckedUntil = ack.tasksAckedUntil || 0;
 
     await Promise.all(nodes.map(async (n) => {
       if (n.status !== 'online') return;
@@ -262,7 +268,7 @@ function computeAlerts() {
   });
 
   const cutoff = Math.floor(Date.now() / 1000) - 7200;
-  const ackedUntil = getAckedUntil();
+  const ackedUntil = state.tasksAckedUntil || 0;
   Object.entries(state.tasks).forEach(([node, tasks]) => {
     (tasks || [])
       .filter((tk) =>
