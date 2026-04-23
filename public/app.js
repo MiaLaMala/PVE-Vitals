@@ -19,6 +19,8 @@ const state = {
   nodeDetail: {},
   hostInfo: null,
   tasksAckedUntil: 0,
+  backupJobs: [],
+  guestInfo: {},
   timeframe: 'hour',
   timeframeCycle: ['hour', 'day', 'week'],
   timeframeIdx: 0,
@@ -61,6 +63,8 @@ const i18n = {
     diskAlert: (name, pct) => `Disk on ${name} at ${pct}%`,
     taskFailedAlert: (type, node) => `Task ${type} failed on ${node}`,
     markAsRead: 'Mark as read',
+    backupJobs: 'Backup jobs',
+    backupAll: 'all guests',
   },
   de: {
     cluster: 'Cluster',
@@ -95,6 +99,8 @@ const i18n = {
     diskAlert: (name, pct) => `Disk auf ${name} bei ${pct}%`,
     taskFailedAlert: (type, node) => `Aufgabe ${type} auf ${node} fehlgeschlagen`,
     markAsRead: 'Als erledigt markieren',
+    backupJobs: 'Backup-Aufträge',
+    backupAll: 'alle Gäste',
   },
 };
 
@@ -200,14 +206,18 @@ async function api(path) {
 // ==== Data fetch ============================================================
 async function fetchAll() {
   try {
-    const [nodes, resources, ack] = await Promise.all([
+    const [nodes, resources, ack, backupJobs, guestInfo] = await Promise.all([
       api('/api/nodes'),
       api('/api/cluster/resources'),
       api('/api/ack').catch(() => ({ tasksAckedUntil: 0 })),
+      api('/api/cluster/backup-jobs').catch(() => []),
+      api('/api/guests/info').catch(() => ({})),
     ]);
     state.nodes = nodes;
     state.resources = resources;
     state.tasksAckedUntil = ack.tasksAckedUntil || 0;
+    state.backupJobs = backupJobs || [];
+    state.guestInfo = guestInfo || {};
 
     await Promise.all(nodes.map(async (n) => {
       if (n.status !== 'online') return;
@@ -516,6 +526,10 @@ function renderVMs() {
     const memSev = sevForPct(memPct, th.memWarn, th.memCrit);
     const sev = !isRun ? 'idle' : maxSev(cpuSev, memSev);
     const kind = v.type === 'qemu' ? 'VM' : 'CT';
+    const ips = state.guestInfo[`${v.type}/${v.vmid}/${v.node}`] || [];
+    const ipLine = isRun && ips.length
+      ? `<div class="vm-ips" title="${esc(ips.join(', '))}">${esc(ips.join(' · '))}</div>`
+      : '';
 
     return `
     <div class="vm-row sev-${sev}">
@@ -523,6 +537,7 @@ function renderVMs() {
       <div class="vm-main">
         <div class="vm-name">${esc(v.name || `${kind} ${v.vmid}`)}</div>
         <div class="vm-meta">${esc(kind)} · #${esc(v.vmid)} · ${esc(v.node)}${isRun && v.cpus ? ` · ${esc(v.cpus)} vCPU` : ''}</div>
+        ${ipLine}
       </div>
       ${isRun ? `
       <div class="vm-bars">
@@ -603,9 +618,26 @@ function renderTasks() {
   }).join('');
 }
 
+// ==== Render: backup jobs strip ============================================
+function renderBackupJobs() {
+  const el = $('backup-strip');
+  if (!el) return;
+  const jobs = state.backupJobs || [];
+  if (!jobs.length) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const chips = jobs.map((j) => {
+    const sched = j.schedule || '-';
+    const who = j.vmid ? `VMID ${j.vmid}` : (Number(j.all) === 1 ? t('backupAll') : (j.pool ? `pool ${j.pool}` : '-'));
+    const store = j.storage ? ` → ${j.storage}` : '';
+    return `<div class="backup-chip"><b>${esc(sched)}</b>${esc(who)}${esc(store)}</div>`;
+  }).join('');
+  el.innerHTML = `<div class="backup-strip-label">${esc(t('backupJobs'))} · ${jobs.length}</div>${chips}`;
+}
+
 // ==== Render orchestrator ===================================================
 function render() {
   renderTopBar();
+  renderBackupJobs();
   renderNodes();
   renderVMs();
   renderStorage();

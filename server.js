@@ -138,6 +138,74 @@ app.get('/api/cluster/resources', safeGet(async () =>
   cachedGet('resources', CACHE_TTL, async () => (await pve.get('/cluster/resources')).data.data)
 ));
 
+// ==== Backup jobs & guest info =============================================
+app.get('/api/cluster/backup-jobs', safeGet(async () =>
+  cachedGet('backup-jobs', 60, async () => {
+    try {
+      const r = await pve.get('/cluster/backup');
+      return (r.data.data || []).filter((j) => Number(j.enabled) === 1 || j.enabled === true);
+    } catch { return []; }
+  })
+));
+
+// Gather IP addresses for every running guest.
+// QEMU needs the guest agent installed and running (with VM.Audit perms);
+// LXC uses the host-visible /interfaces endpoint. Failures per guest are
+// swallowed so one broken agent does not kill the response.
+app.get('/api/guests/info', safeGet(async () =>
+  cachedGet('guest-info', 30, async () => {
+    const all = (await pve.get('/cluster/resources')).data.data;
+    const guests = all.filter((r) =>
+      (r.type === 'qemu' || r.type === 'lxc') && r.status === 'running'
+    );
+    const extractIps = (addrs) =>
+      (addrs || [])
+        .filter((a) => a['ip-address-type'] === 'ipv4')
+        .map((a) => a['ip-address'])
+        .filter((ip) => ip && !ip.startsWith('127.') && !ip.startsWith('169.254.'));
+
+    const results = await Promise.allSettled(guests.map(async (g) => {
+      const key = `${g.type}/${g.vmid}/${g.node}`;
+      if (g.type === 'qemu') {
+        const r = await pve.get(
+          `/nodes/${g.node}/qemu/${g.vmid}/agent/network-get-interfaces`,
+          { timeout: 3000 }
+        );
+        const ifaces = r.data.data.result || [];
+        const ips = [];
+        ifaces.forEach((i) => {
+          if (i.name === 'lo') return;
+          extractIps(i['ip-addresses']).forEach((ip) => ips.push(ip));
+        });
+        return [key, Array.from(new Set(ips))];
+      }
+      const r = await pve.get(
+        `/nodes/${g.node}/lxc/${g.vmid}/interfaces`,
+        { timeout: 3000 }
+      );
+      const ifaces = r.data.data || [];
+      const ips = [];
+      ifaces.forEach((i) => {
+        if (i.name === 'lo') return;
+        if (i.inet) {
+          const ip = String(i.inet).split('/')[0];
+          if (ip && !ip.startsWith('127.')) ips.push(ip);
+        }
+      });
+      return [key, Array.from(new Set(ips))];
+    }));
+
+    const map = {};
+    results.forEach((r) => {
+      if (r.status === 'fulfilled') {
+        const [key, ips] = r.value;
+        if (ips.length) map[key] = ips;
+      }
+    });
+    return map;
+  })
+));
+
 // ==== Shared alert ack (synced across all viewers) ==========================
 app.get('/api/ack', (req, res) => {
   res.json({ ok: true, data: readState() });
