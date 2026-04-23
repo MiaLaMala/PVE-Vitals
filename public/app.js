@@ -59,6 +59,7 @@ const i18n = {
     memAlert: (name, pct) => `Memory on ${name} at ${pct}%`,
     diskAlert: (name, pct) => `Disk on ${name} at ${pct}%`,
     taskFailedAlert: (type, node) => `Task ${type} failed on ${node}`,
+    markAsRead: 'Mark as read',
   },
   de: {
     cluster: 'Cluster',
@@ -92,8 +93,22 @@ const i18n = {
     memAlert: (name, pct) => `RAM auf ${name} bei ${pct}%`,
     diskAlert: (name, pct) => `Disk auf ${name} bei ${pct}%`,
     taskFailedAlert: (type, node) => `Aufgabe ${type} auf ${node} fehlgeschlagen`,
+    markAsRead: 'Als erledigt markieren',
   },
 };
+
+// ==== Task-alert acknowledgement ===========================================
+// Only task-failure alerts are dismissible. Real-time alerts (node offline,
+// high CPU/RAM/disk/storage) reflect the current state and are not hidden.
+const ACK_KEY = 'pve-vitals:tasks-acked-until';
+function getAckedUntil() {
+  const v = parseInt(localStorage.getItem(ACK_KEY) || '0', 10);
+  return Number.isFinite(v) ? v : 0;
+}
+function ackTaskAlertsNow() {
+  localStorage.setItem(ACK_KEY, String(Math.floor(Date.now() / 1000)));
+  render();
+}
 
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -247,9 +262,13 @@ function computeAlerts() {
   });
 
   const cutoff = Math.floor(Date.now() / 1000) - 7200;
+  const ackedUntil = getAckedUntil();
   Object.entries(state.tasks).forEach(([node, tasks]) => {
     (tasks || [])
-      .filter((tk) => tk.status && tk.status !== 'OK' && tk.endtime && tk.endtime > cutoff)
+      .filter((tk) =>
+        tk.status && tk.status !== 'OK' &&
+        tk.endtime && tk.endtime > cutoff && tk.endtime > ackedUntil
+      )
       .slice(0, 3)
       .forEach((tk) => alerts.push({ sev: 'warn', msg: t('taskFailedAlert', tk.type || '?', node) }));
   });
@@ -278,9 +297,12 @@ function renderTopBar() {
   const alertsEl = $('alerts');
   if (alerts.length) {
     alertsEl.hidden = false;
-    alertsEl.innerHTML = alerts.slice(0, 12)
+    const chips = alerts.slice(0, 12)
       .map((a) => `<div class="alert alert-${esc(a.sev)}">${esc(a.msg)}</div>`)
       .join('');
+    alertsEl.innerHTML = `${chips}<button class="alert-ack" type="button">${esc(t('markAsRead'))}</button>`;
+    const btn = alertsEl.querySelector('.alert-ack');
+    if (btn) btn.addEventListener('click', ackTaskAlertsNow);
   } else {
     alertsEl.hidden = true;
     alertsEl.innerHTML = '';
@@ -373,8 +395,14 @@ function bar(label, p, detail, sev) {
 function drawSparks(node) {
   const detail = state.nodeDetail[node];
   const rrd = detail?.rrd || [];
+  // PVE RRD uses memused/memtotal on nodes; older builds use mem/maxmem.
+  // Fall back across both so the sparkline works on every version.
   const cpuSeries = rrd.map((p) => (p.cpu ?? 0) * 100);
-  const memSeries = rrd.map((p) => (p.maxmem ? (p.mem / p.maxmem) * 100 : 0));
+  const memSeries = rrd.map((p) => {
+    const used = p.memused ?? p.mem;
+    const total = p.memtotal ?? p.maxmem;
+    return total ? (used / total) * 100 : 0;
+  });
   const netinSeries = rrd.map((p) => p.netin ?? 0);
   const netoutSeries = rrd.map((p) => p.netout ?? 0);
 
