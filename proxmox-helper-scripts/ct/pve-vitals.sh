@@ -29,20 +29,30 @@ function update_script() {
     exit
   fi
 
+  cd /opt/pve-vitals
+  $STD git fetch --quiet origin
+  DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+  [[ -z "$DEFAULT_BRANCH" ]] && DEFAULT_BRANCH=main
+  REMOTE_VERSION=$(git rev-parse --short "origin/${DEFAULT_BRANCH}")
+  CURRENT_VERSION=$(get_cached_version "pve-vitals")
+  [[ -z "$CURRENT_VERSION" ]] && CURRENT_VERSION=$(git rev-parse --short HEAD)
+
+  if [[ "$REMOTE_VERSION" == "$CURRENT_VERSION" ]]; then
+    msg_ok "No update required. ${APP} is already at ${CURRENT_VERSION}."
+    exit
+  fi
+
   NODE_VERSION="20" setup_nodejs
 
   msg_info "Stopping Service"
   systemctl stop pve-vitals
   msg_ok "Stopped Service"
 
-  msg_info "Updating ${APP}"
-  cd /opt/pve-vitals
-  $STD git fetch --quiet origin
-  DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
-  [[ -z "$DEFAULT_BRANCH" ]] && DEFAULT_BRANCH=main
+  msg_info "Updating ${APP} to ${REMOTE_VERSION}"
   $STD git reset --hard "origin/${DEFAULT_BRANCH}"
   $STD npm install --omit=dev --no-audit --no-fund
-  msg_ok "Updated ${APP}"
+  cache_installed_version "pve-vitals" "$REMOTE_VERSION"
+  msg_ok "Updated ${APP} to ${REMOTE_VERSION}"
 
   msg_info "Starting Service"
   systemctl start pve-vitals

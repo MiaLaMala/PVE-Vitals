@@ -29,7 +29,9 @@ cd /opt
 $STD git clone --depth=1 https://github.com/MiaLaMala/PVE-Vitals.git pve-vitals
 cd /opt/pve-vitals
 $STD npm install --omit=dev --no-audit --no-fund
-msg_ok "Installed ${APPLICATION}"
+INSTALLED_VERSION=$(git rev-parse --short HEAD)
+cache_installed_version "pve-vitals" "$INSTALLED_VERSION"
+msg_ok "Installed ${APPLICATION} (${INSTALLED_VERSION})"
 
 msg_info "Configuring ${APPLICATION}"
 cat <<EOF >/opt/pve-vitals/.env
@@ -79,8 +81,4 @@ msg_ok "Created Service"
 
 motd_ssh
 customize
-
-msg_info "Cleaning up"
-$STD apt-get -y autoremove
-$STD apt-get -y autoclean
-msg_ok "Cleaned"
+cleanup_lxc
