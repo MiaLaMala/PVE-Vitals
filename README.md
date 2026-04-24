@@ -28,6 +28,37 @@ The installer sets up Node.js 20, clones the repo, prompts for your Proxmox API 
 
 Prefer to read the script before running it? It lives at `install.sh` in this repo.
 
+## Run in a fresh Proxmox LXC (host-side one-liner)
+
+If you're sitting at a Proxmox host and want a display running in one shot, create a small Debian 13 unprivileged LXC and install inside it. Paste this into the Proxmox node's shell:
+
+```bash
+VMID=900                 # any free VMID
+STORAGE=local-lvm        # rootfs storage (local-lvm, local-zfs, ...)
+
+# Grab the latest Debian 13 template
+pveam update
+TEMPLATE=$(pveam available | awk '$2 ~ /^debian-13-standard.*amd64\.tar\.zst$/ {print $2; exit}')
+pveam download local "$TEMPLATE"
+
+pct create $VMID "local:vztmpl/$TEMPLATE" \
+  --hostname pve-vitals \
+  --cores 1 --memory 512 --swap 256 \
+  --rootfs $STORAGE:2 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+  --unprivileged 1 --features nesting=1 \
+  --onboot 1 --start 1
+```
+
+Once the container is up, enter it and run the installer:
+
+```bash
+pct enter $VMID
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/MiaLaMala/PVE-Vitals/main/install.sh)"
+```
+
+Resources are intentionally small (1 CPU, 512 MB RAM, 2 GB disk): the app is a tiny read-only proxy. The installer will prompt for your Proxmox host IP and API token. A token user with role `PVEAuditor` on `/` is all it needs.
+
 ## Features
 
 - Live node health (CPU, RAM, disk, uptime) with sparkline history that cycles hour / day / week

@@ -1,0 +1,44 @@
+{
+  "name": "PVE-Vitals",
+  "slug": "pve-vitals",
+  "categories": [
+    8
+  ],
+  "date_created": "2026-04-24",
+  "type": "ct",
+  "updateable": true,
+  "privileged": false,
+  "interface_port": 3000,
+  "documentation": "https://github.com/MiaLaMala/PVE-Vitals#readme",
+  "website": "https://github.com/MiaLaMala/PVE-Vitals",
+  "logo": "",
+  "description": "Always-on, read-only Proxmox VE status wall. Green means fine, red means go look. One-page dashboard tuned for a kiosk monitor: live node health (CPU, RAM, disk, uptime), guest overview with per-guest load bars, storage, recent task feed, and an aggregate health banner. HA, Ceph, replication, and backup awareness. Prometheus /metrics endpoint. Bilingual (en/de).",
+  "install_methods": [
+    {
+      "type": "default",
+      "script": "ct/pve-vitals.sh",
+      "config_path": "/opt/pve-vitals/.env",
+      "resources": {
+        "cpu": 1,
+        "ram": 512,
+        "hdd": 2,
+        "os": "Debian",
+        "version": "13"
+      }
+    }
+  ],
+  "default_credentials": {
+    "username": null,
+    "password": null
+  },
+  "notes": [
+    {
+      "text": "Read-only by design: no control endpoints exist. Create a PVE API token first (Datacenter > Permissions > API Tokens > Add) and grant the token user role PVEAuditor on /.",
+      "type": "info"
+    },
+    {
+      "text": "After install, edit /opt/pve-vitals/.env with PVE_HOST, PVE_TOKEN_ID, and PVE_SECRET, then run: systemctl restart pve-vitals",
+      "type": "warning"
+    }
+  ]
+}
