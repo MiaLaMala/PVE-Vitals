@@ -3,22 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0b0d12" />
+  <meta name="theme-color" content="#0a0806" />
   <title>PVE Vitals</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app" id="app">
 
+    <div class="term-prompt" aria-hidden="true">
+      <span class="term-user">root</span><span class="term-at">@</span><span class="term-host" id="term-host">cluster</span><span class="term-sep">:</span><span class="term-path">~</span><span class="term-dollar">$</span>
+      <span class="term-cmd">pve-vitals --watch --interval=2s</span>
+      <span class="term-caret"></span>
+    </div>
+
     <header class="topbar">
       <div class="brand">
-        <svg class="brand-logo" width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M2 20 L7 20 L10 10 L14 24 L18 14 L22 20 L30 20"
-                fill="none" stroke="#e85d2d" stroke-width="2.5"
-                stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <span class="brand-glyph" aria-hidden="true">▮</span>
         <div class="brand-text">
-          <div class="brand-name">PVE Vitals</div>
+          <div class="brand-name">pve_vitals</div>
           <div class="brand-cluster" id="cluster-name" data-i18n="cluster">Cluster</div>
         </div>
       </div>

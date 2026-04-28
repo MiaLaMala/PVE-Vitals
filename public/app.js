@@ -59,6 +59,7 @@ const i18n = {
     memory: 'RAM',
     disk: 'Disk',
     rootDisk: 'Root disk',
+    shared: 'shared',
     empty: 'Nothing to show',
     window: 'Window',
     updatedAgo: (s) => `Updated ${s}s ago`,
@@ -105,6 +106,7 @@ const i18n = {
     memory: 'RAM',
     disk: 'Disk',
     rootDisk: 'Systemdisk',
+    shared: 'geteilt',
     empty: 'Nichts zu zeigen',
     window: 'Zeitraum',
     updatedAgo: (s) => `Vor ${s}s aktualisiert`,
@@ -313,11 +315,17 @@ function computeAlerts() {
     if (diskSev !== 'ok') alerts.push({ sev: diskSev, msg: t('diskAlert', n.node, diskPct) });
   });
 
+  const sharedAlerted = new Set();
   Object.entries(state.storage).forEach(([node, pools]) => {
     (pools || []).forEach((s) => {
+      if (s.shared) {
+        if (sharedAlerted.has(s.storage)) return;
+        sharedAlerted.add(s.storage);
+      }
       const p = pct(s.used, s.total);
       const sev = sevForPct(p, th.storageWarn, th.storageCrit);
-      if (sev !== 'ok') alerts.push({ sev, msg: t('storageAlert', `${node}/${s.storage}`, p) });
+      const label = s.shared ? s.storage : `${node}/${s.storage}`;
+      if (sev !== 'ok') alerts.push({ sev, msg: t('storageAlert', label, p) });
     });
   });
 
@@ -363,6 +371,8 @@ function renderTopBar() {
   if (clusterRes?.name) {
     $('cluster-name').textContent = clusterRes.name;
     document.title = `PVE Vitals · ${clusterRes.name}`;
+    const host = $('term-host');
+    if (host) host.textContent = clusterRes.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   }
 
   const alerts = computeAlerts();
@@ -664,8 +674,25 @@ function renderVMs() {
 function renderStorage() {
   const th = state.thresholds;
   const all = [];
+  const sharedSeen = new Map();
   Object.entries(state.storage).forEach(([node, pools]) => {
-    (pools || []).forEach((p) => all.push({ node, ...p }));
+    (pools || []).forEach((p) => {
+      if (p.shared) {
+        const prev = sharedSeen.get(p.storage);
+        if (prev) {
+          prev.node = t('shared') || 'shared';
+          if ((p.used || 0) > (prev.used || 0)) {
+            prev.used = p.used; prev.total = p.total; prev.avail = p.avail;
+          }
+          return;
+        }
+        const entry = { node, ...p };
+        sharedSeen.set(p.storage, entry);
+        all.push(entry);
+      } else {
+        all.push({ node, ...p });
+      }
+    });
   });
   $('storage-count').textContent = `${all.length}`;
 
