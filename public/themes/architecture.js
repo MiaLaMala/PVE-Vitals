@@ -13,7 +13,7 @@
   const VIEW_W = 700;
   const CARD_W = 140;
   const NODE_H = 80;
-  const STORAGE_H = 52;
+  const STORAGE_H = 60;
   const GUEST_H = 28;
   const GUEST_ROW_PITCH = 30;  // GUEST_H + 2px gap
   const GUEST_ROWS_MIN = 4;
@@ -200,29 +200,37 @@
     const { xs, cardW } = spreadStorages(storages.length);
     const parts = [];
 
-    // Adaptive font size: shrink the big "name" line when cards are narrow.
-    const nameFont = cardW < 110 ? 11 : 13;
-    const nameCharPx = nameFont * 0.62;       // rough advance for a heavy weight
-    const labelCharPx = 5.6;                  // 9px/800 with .18em tracking
-    const usedCharPx = 4.7;                   // 9.5px/500
+    // Approximate per-glyph widths so fitText can ellipsis-truncate before
+    // the SVG renderer clips against the card's right edge.
+    const nameCharPx  = 6.4;   // 11px/800
+    const labelCharPx = 5.0;   // 8.5px/800 with letter-spacing
+    const usedCharPx  = 4.5;   // 8.5px/500
+    const scopeCharPx = 4.0;   // 8px/500 italic
+
+    const sharedLabel = lang === 'de' ? 'geteilt' : 'shared';
 
     storages.forEach((s, i) => {
       const x = xs[i];
       const cx = x + cardW / 2;
       const color = storageColor(s.type);
-      const labelRaw = `${(s.type || 'STO').toUpperCase()} · ${helpers.fmtBytes(s.total)}`;
-      const label = fitText(labelRaw, cardW, labelCharPx);
+      const typeLabel = fitText((s.type || 'STO').toUpperCase(), cardW, labelCharPx);
       const name = fitText(s.storage, cardW, nameCharPx);
       const usedPct = helpers.pct(s.used, s.total);
-      const usedRaw = (lang === 'de' ? 'verw.' : 'used') + ` ${helpers.fmtBytes(s.used)} · ${usedPct}%`;
+      const usedRaw = `${helpers.fmtBytes(s.used)} / ${helpers.fmtBytes(s.total)} · ${usedPct}%`;
       const used = fitText(usedRaw, cardW, usedCharPx);
+      // Scope: shared cluster-wide, or pinned to a single node.
+      const scopeRaw = s.shared ? sharedLabel : (s.node ? `@ ${s.node}` : '');
+      const scope = scopeRaw ? fitText(scopeRaw, cardW, scopeCharPx) : '';
 
       parts.push('<g>');
       parts.push(`<rect x="${x}" y="${STORAGE_Y}" width="${cardW}" height="${STORAGE_H}" rx="6" fill="var(--diagram-card)" stroke="var(--diagram-card-stroke)" stroke-width="1.5"/>`);
       parts.push(`<path d="M ${x} ${STORAGE_Y} h ${cardW - 6} a 6 6 0 0 1 6 6 v 8 h -${cardW} v -8 a 6 6 0 0 1 6 -6 z" fill="${color}"/>`);
-      parts.push(`<text x="${cx}" y="${STORAGE_Y + 12}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".18em">${svgEsc(label)}</text>`);
-      parts.push(`<text x="${cx}" y="${STORAGE_Y + 35}" text-anchor="middle" font-size="${nameFont}" font-weight="800" fill="var(--diagram-text)">${svgEsc(name)}</text>`);
-      parts.push(`<text x="${cx}" y="${STORAGE_Y + 48}" text-anchor="middle" font-size="9.5" font-weight="500" fill="var(--diagram-muted)">${svgEsc(used)}</text>`);
+      parts.push(`<text x="${cx}" y="${STORAGE_Y + 11}" text-anchor="middle" fill="#fff" font-size="8.5" font-weight="800" letter-spacing=".14em">${svgEsc(typeLabel)}</text>`);
+      parts.push(`<text x="${cx}" y="${STORAGE_Y + 30}" text-anchor="middle" font-size="11" font-weight="800" fill="var(--diagram-text)">${svgEsc(name)}</text>`);
+      parts.push(`<text x="${cx}" y="${STORAGE_Y + 43}" text-anchor="middle" font-size="8.5" font-weight="500" fill="var(--diagram-muted)">${svgEsc(used)}</text>`);
+      if (scope) {
+        parts.push(`<text x="${cx}" y="${STORAGE_Y + 55}" text-anchor="middle" font-size="8" font-style="italic" fill="var(--diagram-quiet)" opacity="0.85">${svgEsc(scope)}</text>`);
+      }
       parts.push('</g>');
     });
 
