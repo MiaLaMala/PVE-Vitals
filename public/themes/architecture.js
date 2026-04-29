@@ -8,14 +8,17 @@
 (function () {
   'use strict';
 
-  // === Static layout (matches preview viewBox 0..700 x 0..360) ==============
+  // === Static layout (preview viewBox is 700×360; height grows with the
+  // tallest guest column so big clusters can show every guest, no overflow). ==
   const VIEW_W = 700;
-  const VIEW_H = 360;
   const CARD_W = 140;
   const NODE_H = 80;
   const STORAGE_H = 52;
   const GUEST_H = 28;
-  const GUEST_ROWS = 4;
+  const GUEST_ROW_PITCH = 30;  // GUEST_H + 2px gap
+  const GUEST_ROWS_MIN = 4;
+  const GUEST_ROWS_MAX = 16;   // hard cap so a runaway count can't break SVG scaling
+  const GUEST_FOOTER_PAD = 16; // breathing room below last guest card
   const X_FIRST = 80;     // first column x
   const X_LAST = 620;     // last column right edge
   const STORAGE_Y = 20;
@@ -149,7 +152,7 @@
     // The Proxmox cluster resource carries the real cluster name; fall back
     // only if /api/cluster/resources hasn't returned anything yet.
     const clusterRes = (state.resources || []).find((r) => r && r.type === 'cluster');
-    const host = (clusterRes && clusterRes.name) || 'pve-cluster';
+    const host = state.clusterName || (clusterRes && clusterRes.name) || 'pve-cluster';
     const title = `${host} · cluster architecture`;
     const lang = state.lang || 'en';
     const metaParts = [
@@ -176,7 +179,9 @@
   }
 
   // === SVG: tier labels =====================================================
-  function svgTierLabels(lang) {
+  // guestY is the vertical centre of the guests tier; varies with cluster size.
+  function svgTierLabels(lang, guestY) {
+    const gy = Math.round(guestY || 290);
     const labels = lang === 'de'
       ? ['SPEICHER', 'KNOTEN', 'VMs & CTs']
       : ['STORAGE', 'NODES', 'VMs & CTs'];
@@ -184,7 +189,7 @@
       '<g font-size="8.5" font-weight="800" letter-spacing=".22em" fill="var(--diagram-quiet)" text-anchor="middle">',
       `<text x="14" y="50" transform="rotate(-90, 14, 50)">${svgEsc(labels[0])}</text>`,
       `<text x="14" y="170" transform="rotate(-90, 14, 170)">${svgEsc(labels[1])}</text>`,
-      `<text x="14" y="290" transform="rotate(-90, 14, 290)">${svgEsc(labels[2])}</text>`,
+      `<text x="14" y="${gy}" transform="rotate(-90, 14, ${gy})">${svgEsc(labels[2])}</text>`,
       '</g>',
     ].join('');
   }
@@ -324,7 +329,7 @@
     return out;
   }
 
-  function svgGuestSpines(nodeXs, hasGuestsByIdx) {
+  function svgGuestSpines(nodeXs, hasGuestsByIdx, spineEndY) {
     if (nodeXs.length === 0) return '';
     const parts = ['<g stroke="var(--diagram-rule)" stroke-width="1.3" fill="none" stroke-linecap="round">'];
     nodeXs.forEach((x, i) => {
@@ -332,14 +337,14 @@
       // drop from node to guest column
       parts.push(`<path d="M ${cx} ${NODE_Y + NODE_H} L ${cx} ${GUEST_Y0}"/>`);
       if (hasGuestsByIdx[i]) {
-        parts.push(`<path d="M ${cx} ${GUEST_Y0} L ${cx} 350"/>`);
+        parts.push(`<path d="M ${cx} ${GUEST_Y0} L ${cx} ${spineEndY}"/>`);
       }
     });
     parts.push('</g>');
     return parts.join('');
   }
 
-  function svgGuests(state, nodes, nodeXs, helpers, lang) {
+  function svgGuests(state, nodes, nodeXs, helpers, lang, guestRows) {
     if (nodes.length === 0) return '';
     const parts = [];
 
@@ -348,12 +353,12 @@
       const all = pickGuestsForNode(state, n.node);
       if (all.length === 0) return;
 
-      const slots = Math.min(all.length, GUEST_ROWS);
+      const slots = Math.min(all.length, guestRows);
       for (let row = 0; row < slots; row += 1) {
-        const isOverflow = (row === GUEST_ROWS - 1) && all.length > GUEST_ROWS;
-        const y = GUEST_Y0 + row * 30;
+        const isOverflow = (row === guestRows - 1) && all.length > guestRows;
+        const y = GUEST_Y0 + row * GUEST_ROW_PITCH;
         if (isOverflow) {
-          const remaining = all.length - (GUEST_ROWS - 1);
+          const remaining = all.length - (guestRows - 1);
           const moreLabel = lang === 'de' ? `+${remaining} weitere` : `+${remaining} more`;
           parts.push('<g>');
           parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-rule)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>`);
@@ -476,13 +481,22 @@
     const hasGuests = nodes.map((n) => pickGuestsForNode(state, n.node).length > 0);
     const lang = state.lang || 'en';
 
+    // Grow the guest column to fit the busiest node, capped to keep the
+    // SVG aspect ratio sane on wide kiosks. Single source of truth: the
+    // tallest column drives viewBox height, spine end, and tier-label y.
+    const maxGuests = Math.max(0, ...nodes.map((n) => pickGuestsForNode(state, n.node).length));
+    const guestRows = Math.max(GUEST_ROWS_MIN, Math.min(GUEST_ROWS_MAX, maxGuests));
+    const guestEndY = GUEST_Y0 + (guestRows - 1) * GUEST_ROW_PITCH + GUEST_H;
+    const spineEndY = guestEndY + 4;
+    const viewH = guestEndY + GUEST_FOOTER_PAD;
+
     const svg = [
-      `<svg class="arch-map" viewBox="0 0 ${VIEW_W} ${VIEW_H}" preserveAspectRatio="xMidYMid meet" font-family="Inter, sans-serif">`,
-      svgTierLabels(lang),
+      `<svg class="arch-map" viewBox="0 0 ${VIEW_W} ${viewH}" preserveAspectRatio="xMidYMid meet" font-family="Inter, sans-serif">`,
+      svgTierLabels(lang, GUEST_Y0 + (guestEndY - GUEST_Y0) / 2),
       svgStorages(storages, nodeXs, helpers, lang),
       svgNodes(nodes, nodeXs, helpers, lang, state.thresholds || {}),
-      svgGuestSpines(nodeXs, hasGuests),
-      svgGuests(state, nodes, nodeXs, helpers, lang),
+      svgGuestSpines(nodeXs, hasGuests, spineEndY),
+      svgGuests(state, nodes, nodeXs, helpers, lang, guestRows),
       '</svg>',
     ].join('');
 

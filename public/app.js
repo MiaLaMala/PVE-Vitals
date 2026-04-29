@@ -36,6 +36,7 @@ const state = {
   fetchFailCount: 0,
   themeFamily: 'phosphor',
   themeMode: 'dark',
+  clusterName: null,
 };
 
 const i18n = {
@@ -413,12 +414,15 @@ function computeAlerts() {
 
 // ==== Render: top bar + alerts =============================================
 function renderTopBar() {
+  // Priority: explicit CLUSTER_NAME env var → /api/cluster/resources name →
+  // localised "Cluster" placeholder set by applyI18n.
   const clusterRes = state.resources.find((r) => r.type === 'cluster');
-  if (clusterRes?.name) {
-    $('cluster-name').textContent = clusterRes.name;
-    document.title = `PVE Vitals · ${clusterRes.name}`;
+  const name = state.clusterName || clusterRes?.name || null;
+  if (name) {
+    $('cluster-name').textContent = name;
+    document.title = `PVE Vitals · ${name}`;
     const host = $('term-host');
-    if (host) host.textContent = clusterRes.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+    if (host) host.textContent = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   }
 
   const alerts = computeAlerts();
@@ -1055,6 +1059,7 @@ async function init() {
     state.lang = pickLang(cfg.defaultLang, cfg.forceLang);
     if (cfg.cacheTtl) state.refreshMs = Math.max(5000, cfg.cacheTtl * 1000);
     state.hostInfo = cfg.hostInfo || null;
+    state.clusterName = cfg.clusterName || null;
     if (typeof cfg.autoScrollInterval === 'number') autoScrollInterval = cfg.autoScrollInterval;
     state.enableSound = !!cfg.enableSound;
     if (theme === 'auto' && cfg.defaultTheme) theme = cfg.defaultTheme;

@@ -238,10 +238,18 @@
         }).join('');
 
     const trainNumber = `PVE ${TRIP_START_MS.toString().slice(-4)}`;
-    const clusterName = (state.hostInfo && state.hostInfo.cluster) || 'vitals.lan';
+    const clusterRes  = (state.resources || []).find((r) => r && r.type === 'cluster');
+    const clusterName = state.clusterName || (clusterRes && clusterRes.name) || 'vitals.lan';
     const tripWindow  = `${fmtHHMM(new Date(TRIP_START_MS))} → ${fmtHHMM(new Date(TRIP_END_MS))}`;
 
     const ticker = tickerText(state, helpers);
+
+    // Preserve the existing scrolling Hinweise element across re-renders so
+    // its CSS animation isn't restarted on every fetch cycle. We only restart
+    // when the text actually changes (real new alert worth scrolling from
+    // the start). Stash the old node BEFORE host.innerHTML wipes the tree.
+    const prevScrollEl = host.querySelector('.db-ticker .scroll');
+    const prevScrollText = prevScrollEl ? prevScrollEl.textContent : null;
 
     host.innerHTML = `
       <div class="db-inner" data-sev="${sev}">
@@ -285,6 +293,15 @@
         </div>
       </div>
     `;
+
+    // If the Hinweise text didn't actually change, splice the previous (still
+    // mid-scroll) span back in so the animation continues from where it was.
+    if (prevScrollEl && prevScrollText === ticker) {
+      const newScrollEl = host.querySelector('.db-ticker .scroll');
+      if (newScrollEl && newScrollEl.parentNode) {
+        newScrollEl.parentNode.replaceChild(prevScrollEl, newScrollEl);
+      }
+    }
   }
 
   function tick(state, helpers) {

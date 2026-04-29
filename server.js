@@ -21,6 +21,10 @@ const DEFAULT_LANG = (process.env.DEFAULT_LANG || 'en').toLowerCase().startsWith
 const FORCE_LANG_RAW = (process.env.FORCE_LANG || '').toLowerCase();
 const FORCE_LANG = (FORCE_LANG_RAW === 'de' || FORCE_LANG_RAW === 'en') ? FORCE_LANG_RAW : null;
 const SHOW_HOST_INFO = (process.env.SHOW_HOST_INFO || 'false').toLowerCase() === 'true';
+// Optional override for the cluster label shown in headers and the title.
+// When unset, the frontend falls back to the cluster resource name from
+// /api/cluster/resources, then to the localised "Cluster" string.
+const CLUSTER_NAME = process.env.CLUSTER_NAME ? String(process.env.CLUSTER_NAME).trim() : null;
 const AUTO_SCROLL_INTERVAL = Math.max(0, parseInt(process.env.AUTO_SCROLL_INTERVAL || '15', 10) || 0);
 const ENABLE_SOUND = (process.env.ENABLE_SOUND || 'false').toLowerCase() === 'true';
 // Theme keys: 'phosphor' (default amber CRT), 'professional', 'architecture',
@@ -138,6 +142,7 @@ app.get('/api/config', (req, res) => {
       autoScrollInterval: AUTO_SCROLL_INTERVAL,
       enableSound: ENABLE_SOUND,
       defaultTheme: DEFAULT_THEME,
+      clusterName: CLUSTER_NAME,
       authRequired: DASHBOARD_TOKEN !== null,
       hostInfo: SHOW_HOST_INFO ? { pve: `${PVE_HOST}:${PVE_PORT}` } : null,
     },
