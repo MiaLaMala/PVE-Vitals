@@ -23,8 +23,19 @@ const FORCE_LANG = (FORCE_LANG_RAW === 'de' || FORCE_LANG_RAW === 'en') ? FORCE_
 const SHOW_HOST_INFO = (process.env.SHOW_HOST_INFO || 'false').toLowerCase() === 'true';
 const AUTO_SCROLL_INTERVAL = Math.max(0, parseInt(process.env.AUTO_SCROLL_INTERVAL || '15', 10) || 0);
 const ENABLE_SOUND = (process.env.ENABLE_SOUND || 'false').toLowerCase() === 'true';
-const DEFAULT_THEME = ['light', 'dark', 'auto'].includes((process.env.DEFAULT_THEME || 'auto').toLowerCase())
-  ? (process.env.DEFAULT_THEME || 'auto').toLowerCase() : 'auto';
+// Theme keys: 'phosphor' (default amber CRT), 'professional', 'architecture',
+// 'transit'. Each non-transit family also accepts a '-light' / '-dark' suffix
+// to pin a colour mode; 'transit' ships dark only. Bare 'light' / 'dark' /
+// 'auto' are kept as legacy aliases for the Phosphor sub-mode.
+const VALID_THEMES = [
+  'phosphor', 'phosphor-light', 'phosphor-dark',
+  'light', 'dark', 'auto',
+  'professional', 'professional-light', 'professional-dark',
+  'architecture', 'architecture-light', 'architecture-dark',
+  'transit',
+];
+const RAW_THEME = (process.env.DEFAULT_THEME || 'auto').toLowerCase();
+const DEFAULT_THEME = VALID_THEMES.includes(RAW_THEME) ? RAW_THEME : 'auto';
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN ? String(process.env.DASHBOARD_TOKEN) : null;
 
 const thresholds = {

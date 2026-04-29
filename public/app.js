@@ -34,6 +34,8 @@ const state = {
   refreshMs: 10000,
   lastGoodUpdate: null,
   fetchFailCount: 0,
+  themeFamily: 'phosphor',
+  themeMode: 'dark',
 };
 
 const i18n = {
@@ -409,11 +411,22 @@ function renderTopBar() {
 
 // ==== Render: clock + last updated =========================================
 function renderClock() {
+  const family = state.themeFamily || 'phosphor';
+  const mod = window.PVE_THEMES?.[family];
+  if (mod && typeof mod.tick === 'function') {
+    try { mod.tick(state, themeHelpers()); }
+    catch (e) { console.error(`[theme:${family}] tick failed:`, e); }
+    return;
+  }
+
+  const clockEl = $('clock');
+  if (!clockEl) return;
   const d = new Date();
-  $('clock').textContent =
+  clockEl.textContent =
     `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
   const lu = $('last-updated');
+  if (!lu) return;
   if (state.lastGoodUpdate) {
     const age = Math.round((Date.now() - state.lastGoodUpdate) / 1000);
     lu.textContent = age > 30 ? t('staleSince', age) : t('updatedAgo', age);
@@ -797,7 +810,17 @@ function renderBackupJobs() {
 }
 
 // ==== Render orchestrator ===================================================
+// Architecture and Transit themes own the entire viewport via #theme-host and
+// register a renderer on window.PVE_THEMES. Phosphor and Professional share
+// the DOM and re-use the panel pipeline below.
 function render() {
+  const family = state.themeFamily || 'phosphor';
+  const mod = window.PVE_THEMES?.[family];
+  if (mod && typeof mod.render === 'function') {
+    try { mod.render(state, themeHelpers()); }
+    catch (e) { console.error(`[theme:${family}] render failed:`, e); }
+    return;
+  }
   renderTopBar();
   renderClusterSummary();
   renderBackupJobs();
@@ -856,12 +879,83 @@ function toggleFullscreen() {
 }
 
 // ==== Theme ================================================================
-function applyTheme(theme) {
-  let resolved = theme;
-  if (!['light', 'dark'].includes(resolved)) {
-    resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+// Theme keys are 'phosphor' | 'professional' | 'architecture' | 'transit',
+// optionally with a '-light' or '-dark' suffix that pins the colour mode.
+// Bare 'light' / 'dark' / 'auto' are legacy aliases for the Phosphor family.
+// Phosphor and Transit ship a single CSS file (style.css and transit.css);
+// the others have a separate stylesheet under /themes that is loaded on
+// demand. Architecture and Transit also have a JS renderer that takes over
+// the DOM via #theme-host while the standard panel grid stays hidden.
+function resolveTheme(rawTheme) {
+  const t = String(rawTheme || '').toLowerCase().trim();
+  if (t === 'light' || t === 'dark') return { family: 'phosphor', mode: t };
+  if (!t || t === 'auto') return { family: 'phosphor', mode: 'auto' };
+  const m = t.match(/^(phosphor|professional|architecture|transit)(?:-(light|dark))?$/);
+  if (!m) return { family: 'phosphor', mode: 'auto' };
+  let mode = m[2] || 'auto';
+  if (m[1] === 'transit') mode = 'dark';
+  return { family: m[1], mode };
+}
+
+function applyTheme(rawTheme) {
+  const { family, mode } = resolveTheme(rawTheme);
+  const resolvedMode = mode === 'auto'
+    ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : mode;
+
+  // For phosphor we keep emitting data-theme="light"/"dark" so the existing
+  // :root[data-theme="light"] override in style.css continues to apply.
+  if (family === 'phosphor') {
+    document.documentElement.dataset.theme = resolvedMode;
+  } else {
+    document.documentElement.dataset.theme =
+      resolvedMode === 'light' ? `${family}-light` : family;
   }
-  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themeFamily = family;
+  document.documentElement.dataset.themeMode = resolvedMode;
+  state.themeFamily = family;
+  state.themeMode = resolvedMode;
+}
+
+const themeAssetPromises = new Map();
+function loadThemeAssets(family) {
+  if (family === 'phosphor') return Promise.resolve();
+  if (themeAssetPromises.has(family)) return themeAssetPromises.get(family);
+
+  const promise = (async () => {
+    const cssId = `theme-css-${family}`;
+    if (!document.getElementById(cssId)) {
+      const link = document.createElement('link');
+      link.id = cssId;
+      link.rel = 'stylesheet';
+      link.href = `themes/${family}.css`;
+      document.head.appendChild(link);
+    }
+    if (family === 'architecture' || family === 'transit') {
+      await new Promise((resolve, reject) => {
+        const jsId = `theme-js-${family}`;
+        if (document.getElementById(jsId)) return resolve();
+        const s = document.createElement('script');
+        s.id = jsId;
+        s.src = `themes/${family}.js`;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(`failed to load themes/${family}.js`));
+        document.head.appendChild(s);
+      });
+    }
+  })();
+  themeAssetPromises.set(family, promise);
+  return promise;
+}
+
+// Theme renderers register here (architecture.js / transit.js).
+// Shape: { render(state, helpers), tick?() }
+window.PVE_THEMES = window.PVE_THEMES || {};
+function themeHelpers() {
+  return {
+    t, esc, pct, fmtBytes, fmtUptime, fmtRelTime,
+    sevForPct, maxSev, computeAlerts,
+  };
 }
 
 // Auto-scroll long panel bodies so wall-monitor viewers see all content.
@@ -904,6 +998,8 @@ async function init() {
   }
 
   applyTheme(theme);
+  try { await loadThemeAssets(state.themeFamily); }
+  catch (e) { console.error('theme assets:', e); }
   applyI18n();
   renderAttribution();
   renderClock();

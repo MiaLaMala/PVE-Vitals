@@ -41,7 +41,13 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-*, *::before, *::after { border-radius: 0 !important; }
+/* Force-flat corners are a Phosphor signature; other theme families opt out. */
+html:not([data-theme-family]) *,
+html:not([data-theme-family]) *::before,
+html:not([data-theme-family]) *::after,
+html[data-theme-family="phosphor"] *,
+html[data-theme-family="phosphor"] *::before,
+html[data-theme-family="phosphor"] *::after { border-radius: 0 !important; }
 
 html, body { height: 100%; }
 body {
