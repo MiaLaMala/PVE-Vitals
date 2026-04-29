@@ -275,6 +275,127 @@
   white-space: nowrap;
 }
 
+/* ==== Guest tier (HTML, horizontal flow per node) ======================= */
+.arch-stage { grid-template-rows: auto auto 1fr auto; }
+.arch-map-wrap { aspect-ratio: 700 / 230; max-height: 50vh; }
+.arch-guests-wrap { min-height: 0; overflow-y: auto; }
+.arch-guests {
+  display: grid;
+  gap: 8px;
+  padding: 10px 18px 14px;
+  font-family: var(--font-sans);
+}
+.arch-guests-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 14px;
+  align-items: start;
+  padding-top: 8px;
+  border-top: 1px solid var(--diagram-rule);
+}
+.arch-guests-row:first-child { border-top: none; padding-top: 0; }
+.arch-guests-row .gnode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--diagram-text);
+  white-space: nowrap;
+}
+.arch-guests-row .gnode .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ok-green);
+}
+.arch-guests-row .gnode .dot.crit { background: var(--crit-red); }
+.arch-guests-row .gnode .count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--diagram-quiet);
+  background: var(--diagram-card);
+  border: 1px solid var(--diagram-rule);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-feature-settings: 'tnum';
+}
+.arch-guests-row .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.arch-guests-row .empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--diagram-quiet);
+  padding: 4px 0;
+}
+.arch-chip {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  align-items: center;
+  background: var(--diagram-card);
+  border: 1px solid var(--diagram-card-stroke);
+  border-radius: 5px;
+  font-size: 11px;
+  min-width: 170px;
+  max-width: 240px;
+  overflow: hidden;
+}
+.arch-chip > .badge {
+  background: var(--vm-blue);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+}
+.arch-chip.ct > .badge { background: var(--ct-amber); }
+.arch-chip.stopped > .badge { background: var(--diagram-quiet); }
+.arch-chip > .info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px 8px;
+}
+.arch-chip > .info .name {
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--diagram-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.arch-chip.stopped > .info .name {
+  font-style: italic;
+  color: var(--diagram-muted);
+}
+.arch-chip > .info .stats {
+  font-size: 9px;
+  color: var(--diagram-quiet);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.arch-chip > .cdot {
+  width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 8px;
+  background: var(--ok-green);
+}
+.arch-chip > .cdot.warn { background: var(--warn-amber); }
+.arch-chip > .cdot.crit { background: var(--crit-red); }
+.arch-chip > .pause {
+  margin-right: 8px;
+  font-size: 11px;
+  color: var(--diagram-muted);
+}
+.arch-chip.stopped { border-style: dashed; opacity: 0.7; }
+
 /* ==== Killfeed: cluster activity log ==================================== */
 .arch-feed {
   background: var(--legend-bg);

@@ -8,22 +8,17 @@
 (function () {
   'use strict';
 
-  // === Static layout (preview viewBox is 700×360; height grows with the
-  // tallest guest column so big clusters can show every guest, no overflow). ==
+  // === Static layout (storage + bus + nodes only — guests live in HTML below
+  // the SVG so they can flow horizontally per node and wrap as needed). =====
   const VIEW_W = 700;
+  const VIEW_H = 230;
   const CARD_W = 140;
   const NODE_H = 80;
   const STORAGE_H = 60;
-  const GUEST_H = 40;
-  const GUEST_ROW_PITCH = 42;  // GUEST_H + 2px gap
-  const GUEST_ROWS_MIN = 4;
-  const GUEST_ROWS_MAX = 12;   // hard cap so a runaway count can't break SVG scaling
-  const GUEST_FOOTER_PAD = 16; // breathing room below last guest card
   const X_FIRST = 80;     // first column x
   const X_LAST = 620;     // last column right edge
   const STORAGE_Y = 20;
   const NODE_Y = 132;
-  const GUEST_Y0 = 224;
 
   // NATO/German letter ids for the decorative sub-line under node names.
   const NATO_EN = ['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT',
@@ -179,17 +174,16 @@
   }
 
   // === SVG: tier labels =====================================================
-  // guestY is the vertical centre of the guests tier; varies with cluster size.
-  function svgTierLabels(lang, guestY) {
-    const gy = Math.round(guestY || 290);
+  // Two tiers stay in SVG: storage (top) and nodes (middle). Guests now live
+  // in HTML below the SVG and carry their own per-row labels.
+  function svgTierLabels(lang) {
     const labels = lang === 'de'
-      ? ['SPEICHER', 'KNOTEN', 'VMs & CTs']
-      : ['STORAGE', 'NODES', 'VMs & CTs'];
+      ? ['SPEICHER', 'KNOTEN']
+      : ['STORAGE', 'NODES'];
     return [
       '<g font-size="8.5" font-weight="800" letter-spacing=".22em" fill="var(--diagram-quiet)" text-anchor="middle">',
       `<text x="14" y="50" transform="rotate(-90, 14, 50)">${svgEsc(labels[0])}</text>`,
       `<text x="14" y="170" transform="rotate(-90, 14, 170)">${svgEsc(labels[1])}</text>`,
-      `<text x="14" y="${gy}" transform="rotate(-90, 14, ${gy})">${svgEsc(labels[2])}</text>`,
       '</g>',
     ].join('');
   }
@@ -337,101 +331,86 @@
     return out;
   }
 
-  function svgGuestSpines(nodeXs, hasGuestsByIdx, spineEndY) {
+  // Small downward "↓" stub at the bottom of each node card, hinting that
+  // its guests are listed below the SVG in the .arch-guests panel.
+  function svgGuestStubs(nodeXs) {
     if (nodeXs.length === 0) return '';
-    const parts = ['<g stroke="var(--diagram-rule)" stroke-width="1.3" fill="none" stroke-linecap="round">'];
-    nodeXs.forEach((x, i) => {
+    const parts = ['<g fill="var(--diagram-quiet)" stroke="none">'];
+    nodeXs.forEach((x) => {
       const cx = x + CARD_W / 2;
-      // drop from node to guest column
-      parts.push(`<path d="M ${cx} ${NODE_Y + NODE_H} L ${cx} ${GUEST_Y0}"/>`);
-      if (hasGuestsByIdx[i]) {
-        parts.push(`<path d="M ${cx} ${GUEST_Y0} L ${cx} ${spineEndY}"/>`);
-      }
+      const ty = NODE_Y + NODE_H + 2;
+      parts.push(`<path d="M ${cx - 4} ${ty} L ${cx + 4} ${ty} L ${cx} ${ty + 6} Z"/>`);
     });
     parts.push('</g>');
     return parts.join('');
   }
 
-  function svgGuests(state, nodes, nodeXs, helpers, lang, guestRows) {
+  // === HTML guests section (one row per node, chips flow horizontally) ====
+  function renderGuests(state, helpers, nodes) {
     if (nodes.length === 0) return '';
-    const parts = [];
+    const lang = state.lang || 'en';
+    const emptyLabel = lang === 'de' ? 'Keine Gäste' : 'No guests';
+    const parts = ['<div class="arch-guests">'];
 
-    nodes.forEach((n, ni) => {
-      const x = nodeXs[ni];
-      const all = pickGuestsForNode(state, n.node);
-      if (all.length === 0) return;
+    nodes.forEach((n) => {
+      const guests = pickGuestsForNode(state, n.node);
+      const onlineCount = guests.filter((g) => g.status === 'running').length;
+      const total = guests.length;
+      const nodeOnline = n.status === 'online';
 
-      const slots = Math.min(all.length, guestRows);
-      for (let row = 0; row < slots; row += 1) {
-        const isOverflow = (row === guestRows - 1) && all.length > guestRows;
-        const y = GUEST_Y0 + row * GUEST_ROW_PITCH;
-        if (isOverflow) {
-          const remaining = all.length - (guestRows - 1);
-          const moreLabel = lang === 'de' ? `+${remaining} weitere` : `+${remaining} more`;
-          parts.push('<g>');
-          parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-rule)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>`);
-          parts.push(`<text x="${x + CARD_W / 2}" y="${y + 18}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--diagram-muted)" font-style="italic">${svgEsc(moreLabel)}</text>`);
-          parts.push('</g>');
-          continue;
-        }
+      parts.push('<div class="arch-guests-row">');
+      parts.push('<div class="gnode">');
+      parts.push(`<span class="dot ${nodeOnline ? 'ok' : 'crit'}"></span>`);
+      parts.push(`<span class="name">${helpers.esc(n.node)}</span>`);
+      parts.push(`<span class="count">${onlineCount}/${total}</span>`);
+      parts.push('</div>');
+      parts.push('<div class="chips">');
 
-        const g = all[row];
-        const isVm = g.type === 'qemu';
-        const banner = isVm ? 'var(--vm-blue)' : 'var(--ct-amber)';
-        const tag = isVm ? 'VM' : 'CT';
-        const stopped = g.status !== 'running';
-        const name = g.name || (isVm ? `vm-${g.vmid}` : `ct-${g.vmid}`);
+      if (guests.length === 0) {
+        parts.push(`<span class="empty">${helpers.esc(emptyLabel)}</span>`);
+      } else {
+        guests.forEach((g) => {
+          const isVm = g.type === 'qemu';
+          const tag = isVm ? 'VM' : 'CT';
+          const stopped = g.status !== 'running';
+          const classes = ['arch-chip', isVm ? 'vm' : 'ct'];
+          if (stopped) classes.push('stopped');
+          const name = g.name || (isVm ? `vm-${g.vmid}` : `ct-${g.vmid}`);
 
-        // Severity dot + stats line for running guests.
-        let dotSev = 'ok';
-        let statsLine = '';
-        if (!stopped) {
-          const memPct = helpers.pct(g.mem, g.maxmem);
-          dotSev = helpers.sevForPct(memPct, state.thresholds.memWarn, state.thresholds.memCrit);
-          const cpuPct = Math.round((g.cpu || 0) * 100);
-          const info = (state.guestInfo || {})[`${g.type}/${g.vmid}/${g.node}`] || {};
-          const ip = (info.ips && info.ips.length) ? info.ips[0] : '';
-          const stat = `${cpuPct}% / ${memPct}%`;
-          // Body width minus banner (26) and right-edge dot (12).
-          const bodyW = CARD_W - 26 - 12;
-          // Try IP + stats first, fall back to stats only if it doesn't fit.
-          const full = ip ? `${ip} · ${stat}` : stat;
-          statsLine = fitText(full, bodyW, 4.0);
-          if (ip && (statsLine === fitText(stat, bodyW, 4.0) || statsLine.length < stat.length + 4)) {
-            // Truncation chopped the stats; prefer keeping CPU/MEM intact.
-            statsLine = fitText(stat, bodyW, 4.0);
+          let stats = '';
+          let dotSev = 'ok';
+          if (!stopped) {
+            const cpuPct = Math.round((g.cpu || 0) * 100);
+            const memPct = helpers.pct(g.mem, g.maxmem);
+            dotSev = helpers.sevForPct(memPct, state.thresholds.memWarn, state.thresholds.memCrit);
+            const info = (state.guestInfo || {})[`${g.type}/${g.vmid}/${g.node}`] || {};
+            const ip = (info.ips && info.ips.length) ? info.ips[0] : '';
+            const bits = [];
+            if (ip) bits.push(ip);
+            bits.push(`${cpuPct}% / ${memPct}%`);
+            stats = bits.join(' · ');
           }
-        }
 
-        // Truncate name to body width before drawing.
-        const nameBodyW = CARD_W - 26 - 14;
-        const nameDrawn = fitText(name, nameBodyW, 6.4);
-
-        parts.push('<g>');
-        if (stopped) {
-          parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-quiet)" stroke-width="1" stroke-dasharray="3 2" opacity="0.6"/>`);
-          parts.push(`<rect x="${x}" y="${y}" width="26" height="${GUEST_H}" rx="4" fill="var(--diagram-quiet)"/>`);
-          parts.push(`<rect x="${x + 20}" y="${y}" width="6" height="${GUEST_H}" fill="var(--diagram-quiet)"/>`);
-          parts.push(`<text x="${x + 13}" y="${y + 25}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
-          parts.push(`<text x="${x + 33}" y="${y + 24}" font-size="11" font-weight="700" font-style="italic" fill="var(--diagram-muted)">${svgEsc(nameDrawn)}</text>`);
-          parts.push(`<text x="${x + CARD_W - 12}" y="${y + 24}" text-anchor="end" font-size="10" font-weight="700" fill="var(--diagram-muted)">⏸</text>`);
-        } else {
-          parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-card-stroke)" stroke-width="1" opacity="0.9"/>`);
-          parts.push(`<rect x="${x}" y="${y}" width="26" height="${GUEST_H}" rx="4" fill="${banner}"/>`);
-          parts.push(`<rect x="${x + 20}" y="${y}" width="6" height="${GUEST_H}" fill="${banner}"/>`);
-          parts.push(`<text x="${x + 13}" y="${y + 25}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
-          parts.push(`<text x="${x + 33}" y="${y + 17}" font-size="11" font-weight="700" fill="var(--diagram-text)">${svgEsc(nameDrawn)}</text>`);
-          parts.push(`<circle cx="${x + CARD_W - 12}" cy="${y + 13}" r="3" fill="${sevColor(dotSev)}"/>`);
-          if (statsLine) {
-            parts.push(`<text x="${x + 33}" y="${y + 31}" font-size="8" font-weight="500" fill="var(--diagram-quiet)">${svgEsc(statsLine)}</text>`);
-          }
-        }
-        parts.push('</g>');
+          parts.push(`<div class="${classes.join(' ')}">`);
+          parts.push(`<span class="badge">${tag}</span>`);
+          parts.push('<div class="info">');
+          parts.push(`<span class="name">${helpers.esc(name)}</span>`);
+          if (stats) parts.push(`<span class="stats">${helpers.esc(stats)}</span>`);
+          parts.push('</div>');
+          if (stopped) parts.push('<span class="pause" aria-hidden="true">⏸</span>');
+          else parts.push(`<span class="cdot ${dotSev}"></span>`);
+          parts.push('</div>');
+        });
       }
+
+      parts.push('</div>'); // .chips
+      parts.push('</div>'); // .arch-guests-row
     });
 
+    parts.push('</div>'); // .arch-guests
     return parts.join('');
   }
+
 
   // === Killfeed: most recent task events across the cluster ================
   function buildKillfeed(state, max) {
@@ -548,49 +527,46 @@
     const guestCount = (state.resources || []).filter((r) => r && (r.type === 'qemu' || r.type === 'lxc')).length;
     const counts = { nodes: nodes.length, storages: storages.length, guests: guestCount };
 
-    // Build wrapper once; only swap header + map + footer innerHTML on re-renders.
+    // Build wrapper once; on re-renders only swap inner HTML of each region.
     let stage = host.querySelector('.arch-stage');
     if (!stage) {
-      host.innerHTML = '<div class="arch-stage"><div class="arch-head-wrap"></div><div class="arch-map-wrap"></div><div class="arch-foot-wrap"></div></div>';
+      host.innerHTML = '<div class="arch-stage">'
+        + '<div class="arch-head-wrap"></div>'
+        + '<div class="arch-map-wrap"></div>'
+        + '<div class="arch-guests-wrap"></div>'
+        + '<div class="arch-foot-wrap"></div>'
+        + '</div>';
       stage = host.querySelector('.arch-stage');
     }
 
-    const headWrap = stage.querySelector('.arch-head-wrap');
-    const mapWrap = stage.querySelector('.arch-map-wrap');
-    const footWrap = stage.querySelector('.arch-foot-wrap');
+    const headWrap   = stage.querySelector('.arch-head-wrap');
+    const mapWrap    = stage.querySelector('.arch-map-wrap');
+    const guestsWrap = stage.querySelector('.arch-guests-wrap');
+    const footWrap   = stage.querySelector('.arch-foot-wrap');
 
     headWrap.innerHTML = renderHeader(state, helpers, counts);
 
     if (nodes.length === 0) {
       mapWrap.innerHTML = `<div class="arch-empty">${helpers.esc(helpers.t('empty'))}</div>`;
+      guestsWrap.innerHTML = '';
       footWrap.innerHTML = renderFooter(state, helpers);
       return;
     }
 
     const nodeXs = spreadXs(nodes.length);
-    const hasGuests = nodes.map((n) => pickGuestsForNode(state, n.node).length > 0);
     const lang = state.lang || 'en';
 
-    // Grow the guest column to fit the busiest node, capped to keep the
-    // SVG aspect ratio sane on wide kiosks. Single source of truth: the
-    // tallest column drives viewBox height, spine end, and tier-label y.
-    const maxGuests = Math.max(0, ...nodes.map((n) => pickGuestsForNode(state, n.node).length));
-    const guestRows = Math.max(GUEST_ROWS_MIN, Math.min(GUEST_ROWS_MAX, maxGuests));
-    const guestEndY = GUEST_Y0 + (guestRows - 1) * GUEST_ROW_PITCH + GUEST_H;
-    const spineEndY = guestEndY + 4;
-    const viewH = guestEndY + GUEST_FOOTER_PAD;
-
     const svg = [
-      `<svg class="arch-map" viewBox="0 0 ${VIEW_W} ${viewH}" preserveAspectRatio="xMidYMid meet" font-family="Inter, sans-serif">`,
-      svgTierLabels(lang, GUEST_Y0 + (guestEndY - GUEST_Y0) / 2),
+      `<svg class="arch-map" viewBox="0 0 ${VIEW_W} ${VIEW_H}" preserveAspectRatio="xMidYMid meet" font-family="Inter, sans-serif">`,
+      svgTierLabels(lang),
       svgStorages(storages, nodeXs, helpers, lang),
       svgNodes(nodes, nodeXs, helpers, lang, state.thresholds || {}),
-      svgGuestSpines(nodeXs, hasGuests, spineEndY),
-      svgGuests(state, nodes, nodeXs, helpers, lang, guestRows),
+      svgGuestStubs(nodeXs),
       '</svg>',
     ].join('');
 
     mapWrap.innerHTML = svg;
+    guestsWrap.innerHTML = renderGuests(state, helpers, nodes);
     footWrap.innerHTML = renderFooter(state, helpers);
   }
 
