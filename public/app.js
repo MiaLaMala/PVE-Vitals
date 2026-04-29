@@ -959,6 +959,11 @@ function applyTheme(rawTheme) {
   document.documentElement.dataset.themeMode = resolvedMode;
   state.themeFamily = family;
   state.themeMode = resolvedMode;
+
+  // The brand-name literal in index.html is "pve_vitals" — a Phosphor
+  // terminal-style identifier. For other families we want a normal title.
+  const brand = document.querySelector('.brand-name');
+  if (brand) brand.textContent = family === 'phosphor' ? 'pve_vitals' : 'PVE Vitals';
 }
 
 const themeAssetPromises = new Map();

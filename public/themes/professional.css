@@ -87,12 +87,9 @@
 :root[data-theme^="professional"] .topbar::before,
 :root[data-theme^="professional"] .topbar::after { content: none; }
 
-:root[data-theme^="professional"] .brand-glyph {
-  color: var(--ok);
-  text-shadow: none;
-  font-size: 18px;
-  animation: none;
-}
+/* The Phosphor brand glyph (▮) is a terminal-block character; hide it
+   in Professional so the brand reads as plain "PVE Vitals". */
+:root[data-theme^="professional"] .brand-glyph { display: none; }
 :root[data-theme^="professional"] .brand-name {
   font-size: 16px;
   font-weight: 600;

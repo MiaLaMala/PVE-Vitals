@@ -62,15 +62,52 @@
     return 'var(--ok-green)';
   }
 
-  // Spread a count of cards across [X_FIRST, X_LAST] returning each card's left x.
+  // Spread N node cards across [X_FIRST, X_LAST] returning each card's left x.
+  // 1 or 2 nodes are pulled inward instead of pinned to the edges so the
+  // diagram does not look hollow when the cluster is small.
   function spreadXs(count) {
     if (count <= 0) return [];
     if (count === 1) return [Math.round((VIEW_W - CARD_W) / 2)];
+    if (count === 2) {
+      const a = Math.round(VIEW_W * 0.30 - CARD_W / 2);
+      const b = Math.round(VIEW_W * 0.70 - CARD_W / 2);
+      return [a, b];
+    }
     const span = X_LAST - X_FIRST - CARD_W;
     const step = span / (count - 1);
     const xs = [];
     for (let i = 0; i < count; i += 1) xs.push(Math.round(X_FIRST + step * i));
     return xs;
+  }
+
+  // Storages get their own width-adaptive spread because they typically
+  // outnumber nodes and would otherwise overlap when squeezed into the node
+  // x-range. Returns { xs, cardW }: cardW shrinks toward 70px when the row
+  // is dense, so 8 storages still fit without collision.
+  const STORAGE_LEFT = 40;
+  const STORAGE_RIGHT = VIEW_W - 40;
+  const STORAGE_GAP = 8;
+  const STORAGE_W_MIN = 70;
+  function spreadStorages(count) {
+    if (count <= 0) return { xs: [], cardW: CARD_W };
+    if (count === 1) {
+      return { xs: [Math.round((VIEW_W - CARD_W) / 2)], cardW: CARD_W };
+    }
+    const totalSpan = STORAGE_RIGHT - STORAGE_LEFT;
+    const fitW = Math.floor((totalSpan - (count - 1) * STORAGE_GAP) / count);
+    const cardW = Math.max(STORAGE_W_MIN, Math.min(CARD_W, fitW));
+    const step = (totalSpan - cardW) / (count - 1);
+    const xs = [];
+    for (let i = 0; i < count; i += 1) xs.push(Math.round(STORAGE_LEFT + step * i));
+    return { xs, cardW };
+  }
+
+  // Truncate a string to roughly cardW pixels at the given font size, using
+  // an ellipsis suffix. Cheap heuristic, no DOM measurement needed.
+  function fitText(s, cardW, charPx) {
+    const max = Math.max(2, Math.floor((cardW - 8) / charPx));
+    const str = String(s == null ? '' : s);
+    return str.length > max ? str.slice(0, max - 1) + '…' : str;
   }
 
   // === Aggregate cluster-wide storages ======================================
@@ -109,8 +146,11 @@
 
   // === Header ===============================================================
   function renderHeader(state, helpers, counts) {
-    const host = state.hostInfo && state.hostInfo.host ? state.hostInfo.host : 'pve-cluster';
-    const title = `${host} - cluster architecture`;
+    // The Proxmox cluster resource carries the real cluster name; fall back
+    // only if /api/cluster/resources hasn't returned anything yet.
+    const clusterRes = (state.resources || []).find((r) => r && r.type === 'cluster');
+    const host = (clusterRes && clusterRes.name) || 'pve-cluster';
+    const title = `${host} · cluster architecture`;
     const lang = state.lang || 'en';
     const metaParts = [
       `${counts.nodes} ${helpers.t('nodes')}`,
@@ -152,36 +192,46 @@
   // === SVG: tier 1 storage cards + bus =====================================
   function svgStorages(storages, nodeXs, helpers, lang) {
     if (storages.length === 0) return '';
-    const xs = spreadXs(storages.length);
+    const { xs, cardW } = spreadStorages(storages.length);
     const parts = [];
+
+    // Adaptive font size: shrink the big "name" line when cards are narrow.
+    const nameFont = cardW < 110 ? 11 : 13;
+    const nameCharPx = nameFont * 0.62;       // rough advance for a heavy weight
+    const labelCharPx = 5.6;                  // 9px/800 with .18em tracking
+    const usedCharPx = 4.7;                   // 9.5px/500
 
     storages.forEach((s, i) => {
       const x = xs[i];
-      const cx = x + CARD_W / 2;
+      const cx = x + cardW / 2;
       const color = storageColor(s.type);
-      const label = `${(s.type || 'STO').toUpperCase()} · ${helpers.fmtBytes(s.total)}`;
+      const labelRaw = `${(s.type || 'STO').toUpperCase()} · ${helpers.fmtBytes(s.total)}`;
+      const label = fitText(labelRaw, cardW, labelCharPx);
+      const name = fitText(s.storage, cardW, nameCharPx);
       const usedPct = helpers.pct(s.used, s.total);
-      const usedLine = (lang === 'de' ? 'verw.' : 'used') + ` ${helpers.fmtBytes(s.used)} · ${usedPct}%`;
+      const usedRaw = (lang === 'de' ? 'verw.' : 'used') + ` ${helpers.fmtBytes(s.used)} · ${usedPct}%`;
+      const used = fitText(usedRaw, cardW, usedCharPx);
+
       parts.push('<g>');
-      parts.push(`<rect x="${x}" y="${STORAGE_Y}" width="${CARD_W}" height="${STORAGE_H}" rx="6" fill="var(--diagram-card)" stroke="var(--diagram-card-stroke)" stroke-width="1.5"/>`);
-      parts.push(`<path d="M ${x} ${STORAGE_Y} h ${CARD_W - 6} a 6 6 0 0 1 6 6 v 8 h -${CARD_W} v -8 a 6 6 0 0 1 6 -6 z" fill="${color}"/>`);
+      parts.push(`<rect x="${x}" y="${STORAGE_Y}" width="${cardW}" height="${STORAGE_H}" rx="6" fill="var(--diagram-card)" stroke="var(--diagram-card-stroke)" stroke-width="1.5"/>`);
+      parts.push(`<path d="M ${x} ${STORAGE_Y} h ${cardW - 6} a 6 6 0 0 1 6 6 v 8 h -${cardW} v -8 a 6 6 0 0 1 6 -6 z" fill="${color}"/>`);
       parts.push(`<text x="${cx}" y="${STORAGE_Y + 12}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".18em">${svgEsc(label)}</text>`);
-      parts.push(`<text x="${cx}" y="${STORAGE_Y + 35}" text-anchor="middle" font-size="13" font-weight="800" fill="var(--diagram-text)">${svgEsc(s.storage)}</text>`);
-      parts.push(`<text x="${cx}" y="${STORAGE_Y + 48}" text-anchor="middle" font-size="9.5" font-weight="500" fill="var(--diagram-muted)">${svgEsc(usedLine)}</text>`);
+      parts.push(`<text x="${cx}" y="${STORAGE_Y + 35}" text-anchor="middle" font-size="${nameFont}" font-weight="800" fill="var(--diagram-text)">${svgEsc(name)}</text>`);
+      parts.push(`<text x="${cx}" y="${STORAGE_Y + 48}" text-anchor="middle" font-size="9.5" font-weight="500" fill="var(--diagram-muted)">${svgEsc(used)}</text>`);
       parts.push('</g>');
     });
 
     // Storage -> node bus at y=104.
     parts.push('<g stroke="var(--diagram-rule)" stroke-width="1.4" fill="none" stroke-linecap="round">');
-    storages.forEach((s, i) => {
-      const cx = xs[i] + CARD_W / 2;
+    xs.forEach((sx) => {
+      const cx = sx + cardW / 2;
       parts.push(`<path d="M ${cx} ${STORAGE_Y + STORAGE_H} L ${cx} 104"/>`);
     });
     if (nodeXs.length > 0) {
       const minX = Math.min(...nodeXs.map((x) => x + CARD_W / 2));
       const maxX = Math.max(...nodeXs.map((x) => x + CARD_W / 2));
-      const minS = Math.min(...xs.map((x) => x + CARD_W / 2));
-      const maxS = Math.max(...xs.map((x) => x + CARD_W / 2));
+      const minS = Math.min(...xs.map((x) => x + cardW / 2));
+      const maxS = Math.max(...xs.map((x) => x + cardW / 2));
       const busL = Math.min(minX, minS);
       const busR = Math.max(maxX, maxS);
       parts.push(`<path d="M ${busL} 104 L ${busR} 104"/>`);
@@ -193,8 +243,8 @@
     parts.push('</g>');
 
     parts.push('<g fill="var(--diagram-rule)" stroke="none">');
-    xs.forEach((x) => {
-      parts.push(`<circle cx="${x + CARD_W / 2}" cy="104" r="2.5"/>`);
+    xs.forEach((sx) => {
+      parts.push(`<circle cx="${sx + cardW / 2}" cy="104" r="2.5"/>`);
     });
     nodeXs.forEach((nx) => {
       parts.push(`<circle cx="${nx + CARD_W / 2}" cy="104" r="2.5"/>`);
@@ -202,7 +252,7 @@
     parts.push('</g>');
 
     const microcopy = lang === 'de' ? 'geteilt mit allen Knoten' : 'shared on all nodes';
-    parts.push(`<text x="640" y="100" text-anchor="end" font-size="8" font-style="italic" fill="var(--diagram-quiet)">${svgEsc(microcopy)}</text>`);
+    parts.push(`<text x="${VIEW_W - 12}" y="100" text-anchor="end" font-size="8" font-style="italic" fill="var(--diagram-quiet)">${svgEsc(microcopy)}</text>`);
 
     return parts.join('');
   }

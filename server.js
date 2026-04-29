@@ -34,8 +34,10 @@ const VALID_THEMES = [
   'architecture', 'architecture-light', 'architecture-dark',
   'transit',
 ];
-const RAW_THEME = (process.env.DEFAULT_THEME || 'auto').toLowerCase();
-const DEFAULT_THEME = VALID_THEMES.includes(RAW_THEME) ? RAW_THEME : 'auto';
+// Unset DEFAULT_THEME ships the Professional theme. Existing deployments
+// that explicitly set 'auto' (or 'light' / 'dark') keep getting Phosphor.
+const RAW_THEME = (process.env.DEFAULT_THEME || 'professional').toLowerCase();
+const DEFAULT_THEME = VALID_THEMES.includes(RAW_THEME) ? RAW_THEME : 'professional';
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN ? String(process.env.DASHBOARD_TOKEN) : null;
 
 const thresholds = {
