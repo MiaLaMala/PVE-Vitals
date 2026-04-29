@@ -930,8 +930,24 @@ function toggleFullscreen() {
 // the others have a separate stylesheet under /themes that is loaded on
 // demand. Architecture and Transit also have a JS renderer that takes over
 // the DOM via #theme-host while the standard panel grid stays hidden.
+// Pick one of the four theme families using today's date as the seed, so
+// every viewer of the same cluster lands on the same theme on the same day
+// (across reloads). Switches at local midnight; no mid-day shuffling.
+function pickRandomFamily() {
+  const families = ['phosphor', 'professional', 'architecture', 'transit'];
+  const d = new Date();
+  const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return families[h % families.length];
+}
+
 function resolveTheme(rawTheme) {
   const t = String(rawTheme || '').toLowerCase().trim();
+  if (t === 'random') return resolveTheme(pickRandomFamily());
   if (t === 'light' || t === 'dark') return { family: 'phosphor', mode: t };
   if (!t || t === 'auto') return { family: 'phosphor', mode: 'auto' };
   const m = t.match(/^(phosphor|professional|architecture|transit)(?:-(light|dark))?$/);

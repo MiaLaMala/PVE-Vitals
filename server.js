@@ -33,6 +33,7 @@ const VALID_THEMES = [
   'professional', 'professional-light', 'professional-dark',
   'architecture', 'architecture-light', 'architecture-dark',
   'transit',
+  'random',
 ];
 // Unset DEFAULT_THEME ships the Professional theme. Existing deployments
 // that explicitly set 'auto' (or 'light' / 'dark') keep getting Phosphor.
