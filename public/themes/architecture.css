@@ -206,8 +206,12 @@
 /* ==== Footer ============================================================= */
 .arch-foot {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
   border-top: 2px solid var(--header-bg);
+}
+.arch-foot-top {
+  display: grid;
+  grid-template-columns: auto 1fr;
 }
 .arch-legend {
   display: flex;
@@ -269,6 +273,65 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ==== Killfeed: cluster activity log ==================================== */
+.arch-feed {
+  background: var(--legend-bg);
+  color: var(--legend-text);
+  border-top: 1px solid var(--diagram-rule);
+  padding: 6px 14px 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 14px;
+  align-items: start;
+  font-size: 10px;
+  font-feature-settings: 'tnum';
+}
+.arch-feed > .head {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--diagram-quiet);
+  white-space: nowrap;
+  padding-top: 1px;
+}
+.arch-feed .feed-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.arch-feed li {
+  display: grid;
+  grid-template-columns: 36px 14px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.arch-feed li time { color: var(--diagram-quiet); font-weight: 700; }
+.arch-feed li i {
+  font-style: normal;
+  font-weight: 800;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1;
+}
+.arch-feed li.ok i   { color: var(--ok-green); }
+.arch-feed li.warn i { color: var(--warn-amber); }
+.arch-feed li.crit i { color: var(--crit-red); }
+.arch-feed li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arch-feed li.empty {
+  grid-template-columns: 1fr;
+  color: var(--diagram-quiet);
+  font-style: italic;
 }
 
 /* ==== Reduced motion ===================================================== */

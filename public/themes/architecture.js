@@ -14,10 +14,10 @@
   const CARD_W = 140;
   const NODE_H = 80;
   const STORAGE_H = 60;
-  const GUEST_H = 28;
-  const GUEST_ROW_PITCH = 30;  // GUEST_H + 2px gap
+  const GUEST_H = 40;
+  const GUEST_ROW_PITCH = 42;  // GUEST_H + 2px gap
   const GUEST_ROWS_MIN = 4;
-  const GUEST_ROWS_MAX = 16;   // hard cap so a runaway count can't break SVG scaling
+  const GUEST_ROWS_MAX = 12;   // hard cap so a runaway count can't break SVG scaling
   const GUEST_FOOTER_PAD = 16; // breathing room below last guest card
   const X_FIRST = 80;     // first column x
   const X_LAST = 620;     // last column right edge
@@ -382,28 +382,49 @@
         const stopped = g.status !== 'running';
         const name = g.name || (isVm ? `vm-${g.vmid}` : `ct-${g.vmid}`);
 
-        // Severity dot for running guests.
+        // Severity dot + stats line for running guests.
         let dotSev = 'ok';
+        let statsLine = '';
         if (!stopped) {
           const memPct = helpers.pct(g.mem, g.maxmem);
           dotSev = helpers.sevForPct(memPct, state.thresholds.memWarn, state.thresholds.memCrit);
+          const cpuPct = Math.round((g.cpu || 0) * 100);
+          const info = (state.guestInfo || {})[`${g.type}/${g.vmid}/${g.node}`] || {};
+          const ip = (info.ips && info.ips.length) ? info.ips[0] : '';
+          const stat = `${cpuPct}% / ${memPct}%`;
+          // Body width minus banner (26) and right-edge dot (12).
+          const bodyW = CARD_W - 26 - 12;
+          // Try IP + stats first, fall back to stats only if it doesn't fit.
+          const full = ip ? `${ip} · ${stat}` : stat;
+          statsLine = fitText(full, bodyW, 4.0);
+          if (ip && (statsLine === fitText(stat, bodyW, 4.0) || statsLine.length < stat.length + 4)) {
+            // Truncation chopped the stats; prefer keeping CPU/MEM intact.
+            statsLine = fitText(stat, bodyW, 4.0);
+          }
         }
+
+        // Truncate name to body width before drawing.
+        const nameBodyW = CARD_W - 26 - 14;
+        const nameDrawn = fitText(name, nameBodyW, 6.4);
 
         parts.push('<g>');
         if (stopped) {
           parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-quiet)" stroke-width="1" stroke-dasharray="3 2" opacity="0.6"/>`);
           parts.push(`<rect x="${x}" y="${y}" width="26" height="${GUEST_H}" rx="4" fill="var(--diagram-quiet)"/>`);
           parts.push(`<rect x="${x + 20}" y="${y}" width="6" height="${GUEST_H}" fill="var(--diagram-quiet)"/>`);
-          parts.push(`<text x="${x + 13}" y="${y + 18}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
-          parts.push(`<text x="${x + 33}" y="${y + 18}" font-size="11" font-weight="700" font-style="italic" fill="var(--diagram-muted)">${svgEsc(name)}</text>`);
-          parts.push(`<text x="${x + CARD_W - 12}" y="${y + 18}" text-anchor="end" font-size="10" font-weight="700" fill="var(--diagram-muted)">⏸</text>`);
+          parts.push(`<text x="${x + 13}" y="${y + 25}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
+          parts.push(`<text x="${x + 33}" y="${y + 24}" font-size="11" font-weight="700" font-style="italic" fill="var(--diagram-muted)">${svgEsc(nameDrawn)}</text>`);
+          parts.push(`<text x="${x + CARD_W - 12}" y="${y + 24}" text-anchor="end" font-size="10" font-weight="700" fill="var(--diagram-muted)">⏸</text>`);
         } else {
           parts.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${GUEST_H}" rx="4" fill="var(--diagram-card)" stroke="var(--diagram-card-stroke)" stroke-width="1" opacity="0.9"/>`);
           parts.push(`<rect x="${x}" y="${y}" width="26" height="${GUEST_H}" rx="4" fill="${banner}"/>`);
           parts.push(`<rect x="${x + 20}" y="${y}" width="6" height="${GUEST_H}" fill="${banner}"/>`);
-          parts.push(`<text x="${x + 13}" y="${y + 18}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
-          parts.push(`<text x="${x + 33}" y="${y + 18}" font-size="11" font-weight="700" fill="var(--diagram-text)">${svgEsc(name)}</text>`);
-          parts.push(`<circle cx="${x + CARD_W - 12}" cy="${y + 14}" r="3" fill="${sevColor(dotSev)}"/>`);
+          parts.push(`<text x="${x + 13}" y="${y + 25}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800" letter-spacing=".06em">${tag}</text>`);
+          parts.push(`<text x="${x + 33}" y="${y + 17}" font-size="11" font-weight="700" fill="var(--diagram-text)">${svgEsc(nameDrawn)}</text>`);
+          parts.push(`<circle cx="${x + CARD_W - 12}" cy="${y + 13}" r="3" fill="${sevColor(dotSev)}"/>`);
+          if (statsLine) {
+            parts.push(`<text x="${x + 33}" y="${y + 31}" font-size="8" font-weight="500" fill="var(--diagram-quiet)">${svgEsc(statsLine)}</text>`);
+          }
         }
         parts.push('</g>');
       }
@@ -412,12 +433,54 @@
     return parts.join('');
   }
 
+  // === Killfeed: most recent task events across the cluster ================
+  function buildKillfeed(state, max) {
+    const out = [];
+    const tasksByNode = state.tasks || {};
+    Object.keys(tasksByNode).forEach((node) => {
+      const arr = tasksByNode[node] || [];
+      arr.forEach((tk) => {
+        if (!tk) return;
+        const ts = tk.endtime || tk.starttime;
+        if (!ts) return;
+        const isOk   = tk.status === 'OK';
+        const isFail = tk.status && tk.status !== 'OK' && tk.endtime;
+        const isRun  = !tk.endtime;
+        let sev, icon;
+        if (isFail)      { sev = 'crit'; icon = '✕'; }
+        else if (isRun)  { sev = 'warn'; icon = '⏵'; }
+        else if (isOk)   { sev = 'ok';   icon = '✓'; }
+        else return;
+        out.push({
+          ts,
+          sev,
+          icon,
+          type: tk.type || '?',
+          id: tk.id || '',
+          node,
+          user: tk.user || '',
+        });
+      });
+    });
+    out.sort((a, b) => b.ts - a.ts);
+    return out.slice(0, max || 5);
+  }
+
+  function fmtFeedTime(ts) {
+    const d = new Date(ts * 1000);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+
   // === Footer ==============================================================
   function renderFooter(state, helpers) {
     const lang = state.lang || 'en';
     const labels = lang === 'de'
-      ? { vm: 'VM', ct: 'CT', ok: 'gesund', warm: 'warm', stop: 'gestoppt' }
-      : { vm: 'VM', ct: 'CT', ok: 'healthy', warm: 'warming', stop: 'stopped' };
+      ? { vm: 'VM', ct: 'CT', ok: 'gesund', warm: 'warm', stop: 'gestoppt',
+          activity: 'Aktivität', empty: 'Keine Aktivität' }
+      : { vm: 'VM', ct: 'CT', ok: 'healthy', warm: 'warming', stop: 'stopped',
+          activity: 'Activity', empty: 'No recent activity' };
 
     const alerts = (helpers.computeAlerts() || []);
     let cls = 'ok';
@@ -437,8 +500,22 @@
     }
     if (cls === '') cls = 'warn';
 
+    const feed = buildKillfeed(state, 5);
+    const feedRows = feed.length === 0
+      ? `<li class="empty"><span>${helpers.esc(labels.empty)}</span></li>`
+      : feed.map((e) => {
+          const idPart = e.id ? ` ${e.id}` : '';
+          const userPart = e.user ? ` · ${helpers.esc(e.user)}` : '';
+          return `<li class="${e.sev}">`
+            + `<time>${fmtFeedTime(e.ts)}</time>`
+            + `<i>${e.icon}</i>`
+            + `<span>${helpers.esc(e.type + idPart)} · ${helpers.esc(e.node)}${userPart}</span>`
+            + `</li>`;
+        }).join('');
+
     return [
       '<div class="arch-foot">',
+      '<div class="arch-foot-top">',
       '<div class="arch-legend">',
       `<span class="vm-key"><i></i>${helpers.esc(labels.vm)}</span>`,
       `<span class="ct-key"><i></i>${helpers.esc(labels.ct)}</span>`,
@@ -449,6 +526,11 @@
       `<div class="arch-alerts ${cls === 'ok' ? 'ok' : cls === 'crit' ? 'crit' : ''}">`,
       `<span class="badge">${helpers.esc(badge)}</span>`,
       `<span class="body">${helpers.esc(body)}</span>`,
+      '</div>',
+      '</div>',
+      '<div class="arch-feed">',
+      `<div class="head">${helpers.esc(labels.activity)}</div>`,
+      `<ul class="feed-list">${feedRows}</ul>`,
       '</div>',
       '</div>',
     ].join('');
